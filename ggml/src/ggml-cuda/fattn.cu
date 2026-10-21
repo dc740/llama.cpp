@@ -551,6 +551,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
 
     const int gqa_ratio = Q->ne[2] / K->ne[2];
     GGML_ASSERT(Q->ne[2] % K->ne[2] == 0);
+    bool mla_tile_only = false;
 
     float max_bias = 0.0f;
     memcpy(&max_bias, (const float *) KQV->op_params + 1, sizeof(float));
@@ -613,9 +614,7 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
             if (V->ne[0] != 512) {
                 return BEST_FATTN_KERNEL_NONE;
             }
-            if (!gqa_opt_applies) {
-                return BEST_FATTN_KERNEL_NONE;
-            }
+            mla_tile_only = !gqa_opt_applies;
             break;
         default:
             return BEST_FATTN_KERNEL_NONE;
@@ -623,6 +622,11 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
 
     if (!ggml_cuda_fattn_kv_type_supported(K->type) || !ggml_cuda_fattn_kv_type_supported(V->type)) {
         return BEST_FATTN_KERNEL_NONE;
+    }
+
+    if (mla_tile_only) {
+        // MLA (576/512) with unaligned KV: only the tile kernel bounds-checks its loads.
+        return BEST_FATTN_KERNEL_TILE;
     }
 
     if (mask && mask->ne[2] != 1) {
