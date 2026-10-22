@@ -373,19 +373,19 @@ static const struct ggml_type_traits_cpu type_traits_cpu[GGML_TYPE_COUNT] = {
     },
     [GGML_TYPE_IQ1_XS] = {
         .from_float               = NULL,
-        .vec_dot                  = ggml_vec_dot_iq1_xs_q8_K_generic,
+        .vec_dot                  = ggml_vec_dot_iq1_xs_q8_K,
         .vec_dot_type             = GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [GGML_TYPE_IQ1_XXS] = {
         .from_float               = NULL,
-        .vec_dot                  = ggml_vec_dot_iq1_xxs_q8_K_generic,
+        .vec_dot                  = ggml_vec_dot_iq1_xxs_q8_K,
         .vec_dot_type             = GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
     [GGML_TYPE_IQ1_XXXS] = {
         .from_float               = NULL,
-        .vec_dot                  = ggml_vec_dot_iq1_xxxs_q8_K_generic,
+        .vec_dot                  = ggml_vec_dot_iq1_xxxs_q8_K,
         .vec_dot_type             = GGML_TYPE_Q8_K,
         .nrows                    = 1,
     },
