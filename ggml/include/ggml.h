@@ -430,7 +430,10 @@ extern "C" {
         GGML_TYPE_NVFP4   = 40, // NVFP4 (4 blocks, E4M3 scale)
         GGML_TYPE_Q1_0    = 41,
         GGML_TYPE_Q2_0    = 42,
-        GGML_TYPE_COUNT   = 43,
+        GGML_TYPE_IQ1_XS   = 64,
+        GGML_TYPE_IQ1_XXS  = 65,
+        GGML_TYPE_IQ1_XXXS = 66,
+        GGML_TYPE_COUNT   = 67,
     };
 
     // [TAG_GGML_PREC]
@@ -485,7 +488,10 @@ extern "C" {
         GGML_FTYPE_MOSTLY_MXFP4   = 25, // except 1d tensors
         GGML_FTYPE_MOSTLY_NVFP4   = 26, // except 1d tensors
         GGML_FTYPE_MOSTLY_Q1_0    = 27, // except 1d tensors
-        GGML_FTYPE_MOSTLY_Q2_0    = 28, // except 1d tensors
+        GGML_FTYPE_MOSTLY_Q2_0    = 28,
+        GGML_FTYPE_MOSTLY_IQ1_XS   = 40, // except 1d tensors
+        GGML_FTYPE_MOSTLY_IQ1_XXS  = 41, // except 1d tensors
+        GGML_FTYPE_MOSTLY_IQ1_XXXS = 42, // except 1d tensors // except 1d tensors
     };
 
     // available tensor operations:
