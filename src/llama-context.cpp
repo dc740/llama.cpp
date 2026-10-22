@@ -1,6 +1,7 @@
 #include "llama-context.h"
 
 #include "ggml.h"
+#include "ggml-backend.h"
 #include "llama-arch.h"
 #include "llama-graph.h"
 #include "llama-impl.h"
@@ -2839,7 +2840,7 @@ bool llama_context::sched_copy_experts(ggml_backend_t backend, const ggml_tensor
                 continue;
             }
             if (next < e) {
-                ggml_backend_tensor_set_async(backend, dst, (const uint8_t *) src->data + next*expert_size, next*expert_size, (e - next)*expert_size);
+                ggml_backend_tensor_set_async(backend, dst, ggml_sched_upload_src((const uint8_t *) src->data + next*expert_size, backend), next*expert_size, (e - next)*expert_size);
             }
             e   += n;
             next = e;
@@ -2850,7 +2851,7 @@ bool llama_context::sched_copy_experts(ggml_backend_t backend, const ggml_tensor
         const size_t padding = last < n_expert - 1 ? std::min<size_t>(expert_size, 512) : 0;
         const size_t size    = (last + 1 - next)*expert_size + padding;
         if (size > 0) {
-            ggml_backend_tensor_set_async(backend, dst, (const uint8_t *) src->data + offset, offset, size);
+            ggml_backend_tensor_set_async(backend, dst, ggml_sched_upload_src((const uint8_t *) src->data + offset, backend), offset, size);
         }
 
         first = last + 1;
