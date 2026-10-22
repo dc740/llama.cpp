@@ -864,6 +864,30 @@ static const struct ggml_type_traits type_traits[GGML_TYPE_COUNT] = {
         .to_float                 = (ggml_to_float_t) dequantize_row_iq1_s,
         .from_float_ref           = NULL,
     },
+    [GGML_TYPE_IQ1_XS] = {
+        .type_name                = "iq1_xs",
+        .blck_size                = QK_K,
+        .type_size                = sizeof(block_iq1_xs),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_iq1_xs,
+        .from_float_ref           = NULL,
+    },
+    [GGML_TYPE_IQ1_XXS] = {
+        .type_name                = "iq1_xxs",
+        .blck_size                = QK_K,
+        .type_size                = sizeof(block_iq1_xxs),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_iq1_xxs,
+        .from_float_ref           = NULL,
+    },
+    [GGML_TYPE_IQ1_XXXS] = {
+        .type_name                = "iq1_xxxs",
+        .blck_size                = QK_K,
+        .type_size                = sizeof(block_iq1_xxxs),
+        .is_quantized             = true,
+        .to_float                 = (ggml_to_float_t) dequantize_row_iq1_xxxs,
+        .from_float_ref           = NULL,
+    },
     [GGML_TYPE_IQ1_M] = {
         .type_name                = "iq1_m",
         .blck_size                = QK_K,
@@ -1462,6 +1486,9 @@ enum ggml_type ggml_ftype_to_ggml_type(enum ggml_ftype ftype) {
         case GGML_FTYPE_MOSTLY_IQ2_XS:        wtype = GGML_TYPE_IQ2_XS;   break;
         case GGML_FTYPE_MOSTLY_IQ3_XXS:       wtype = GGML_TYPE_IQ3_XXS;  break;
         case GGML_FTYPE_MOSTLY_IQ1_S:         wtype = GGML_TYPE_IQ1_S;    break;
+        case GGML_FTYPE_MOSTLY_IQ1_XS:        wtype = GGML_TYPE_IQ1_XS;   break;
+        case GGML_FTYPE_MOSTLY_IQ1_XXS:       wtype = GGML_TYPE_IQ1_XXS;  break;
+        case GGML_FTYPE_MOSTLY_IQ1_XXXS:      wtype = GGML_TYPE_IQ1_XXXS; break;
         case GGML_FTYPE_MOSTLY_IQ1_M:         wtype = GGML_TYPE_IQ1_M;    break;
         case GGML_FTYPE_MOSTLY_IQ4_NL:        wtype = GGML_TYPE_IQ4_NL;   break;
         case GGML_FTYPE_MOSTLY_IQ4_XS:        wtype = GGML_TYPE_IQ4_XS;   break;
