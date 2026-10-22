@@ -373,7 +373,9 @@ extern "C" {
     GGML_API void                 ggml_backend_sched_set_eval_callback(ggml_backend_sched_t sched, ggml_backend_sched_eval_callback callback, void * user_data);
 
     // Set a callback to be called when the inputs weights of a split are being copied
-    GGML_API void                 ggml_backend_sched_set_copy_callback(ggml_backend_sched_t sched, ggml_backend_sched_copy_callback callback, void * user_data);
+        // NUMA mirror: returns the replica of *p (inside a mirrored host buffer) local to the NUMA node of dst, or p unchanged when no mirror is registered
+    GGML_API const void *           ggml_sched_upload_src(const void * p, ggml_backend_t dst);
+GGML_API void                 ggml_backend_sched_set_copy_callback(ggml_backend_sched_t sched, ggml_backend_sched_copy_callback callback, void * user_data);
 
     // Set a callback to be called when the compute buffers of a graph are being reallocated
     GGML_API void                 ggml_backend_sched_set_realloc_callback(ggml_backend_sched_t sched, ggml_backend_sched_realloc_callback callback, void * user_data);
