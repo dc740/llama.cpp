@@ -14,10 +14,10 @@ Aggregate throughput serving **8 simultaneous streams** (`llama-batched-bench -n
 
 | model | config | pp t/s | tg t/s |
 |---|---|---|---|
-| GLM-5.3 UD-Q4_K_XL (744B, 435GiB) | `-ngl 99 -dev ROCm0 -ot exps=CPU` | - | **11.36** |
+| GLM-5.3 UD-Q4_K_XL (744B, 435GiB) | `-ngl 99 -dev ROCm0 -ot exps=CPU` | **13.74** | **9.90** |
 | Kimi-K3 UD-TQ1_0 (2.8T, ~474GB) | `-ngl 99 -dev ROCm0,ROCm1,ROCm2 -ot exps=CPU` | **5.59** | **4.19** |
 
-Per-stream = agg/8: GLM ~1.4 t/s, K3 ~0.5 t/s per user. Single-stream TG: GLM 4.04, K3 ~0.7. GLM PP not separately recorded. GLM scales further: npl16 agg 11.73, real chat API @16 streams 9.29 t/s.
+Per-stream = agg/8: GLM ~1.4 t/s, K3 ~0.5 t/s per user. Single-stream TG: GLM 4.04, K3 ~0.7. GLM scales further: npl16 agg 11.73, real chat API @16 streams 9.29 t/s.
 
 ## branch details
 
