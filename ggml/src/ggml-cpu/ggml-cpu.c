@@ -837,7 +837,7 @@ bool ggml_is_numa(void) {
 // Buffers are discovered lazily at graph_compute time (ggml_numa_mirror_scan_graph): no allocator hooks, so any loader path that populates weights before the first compute is covered. Replicas are dropped when the owning buffer is freed (ggml_sched_set_buffer_free_notify).
 //
 
-#define GGML_NUMA_MIRROR_MAX_BUFS 128
+#define GGML_NUMA_MIRROR_MAX_BUFS 1024
 
 #if defined(__gnu_linux__)
 
