@@ -549,9 +549,10 @@ static __global__ void flash_attn_gfx906_512(
 
 // The pair kernel consumes q8_0 K/V natively; the D == 512 kernel and rows
 // whose strides break the 2B-aligned ushort loads keep the fp16 conversion.
-// GGML_GFX906_NO_Q8 forces the fp16 conversion path back on (A/B knob).
+// Set GGML_GFX906_NO_Q8 before startup to force the fp16 conversion path for A/B.
 static bool fattn_gfx906_can_use_q8(const ggml_tensor * t, const int64_t head_size) {
-    if (head_size == 512 || t->type != GGML_TYPE_Q8_0 || (uintptr_t) t->data % 2 != 0) {
+    static const bool disable_q8 = (getenv("GGML_GFX906_NO_Q8") != nullptr);
+    if (disable_q8 || head_size == 512 || t->type != GGML_TYPE_Q8_0 || (uintptr_t) t->data % 2 != 0) {
         return false;
     }
     for (size_t i = 1; i < GGML_MAX_DIMS; ++i) {

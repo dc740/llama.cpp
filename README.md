@@ -44,6 +44,35 @@ Source-level knobs that matter (not env vars - compile-time `#define`):
 - `GGML_NUMA_MIRROR_MAX_BUFS` = **1024** in `ggml/src/ggml-cpu/ggml-cpu.c` - original 16 silently overflowed on Kimi-K3's hundreds of ~1.5GB expert-shard buffers, falling back to unmirrored reads. Set at build time; no env override exists.
 - `GGML_NUMA_MIRROR_HOME` env var exists for mirror home-node override (`--membind` via numactl also works; `move_pages` probe failure warns but mirror still builds via fallback path).
 
+## gfx906 attention controls
+
+Flash attention must be enabled with `--flash-attn on`. Eligible gfx906 operations use the custom kernel automatically; unsupported shapes keep the stock path. Native q8_0 K/V is supported for head dimensions 64 and 128, not 256 or 512. The Qwen3.8-27B GGUF on this host has head dimension 256, so it does not exercise this kernel.
+
+| environment variable | purpose and behavior |
+|---|---|
+| `GGML_GFX906_NO_Q8` | A/B or troubleshooting switch: when set, disables native q8_0 K/V and restores conversion to fp16 before custom attention. Does not disable flash attention itself. Unset by default, allowing native q8_0 on eligible inputs. Conversion needs extra scratch memory and can be slower. |
+| `CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES` | GPU visibility filters that can change device numbering. With `CUDA_VISIBLE_DEVICES=1`, physical GPU1 appears as process-local `ROCm0`. Leave these unset when selecting physical GPU1 by its unremapped `ROCm1` name. |
+
+`GGML_GFX906_NO_Q8` is read once per process. Any set value, including `0` or an empty string, disables native q8_0; use `unset GGML_GFX906_NO_Q8` to restore it and restart the process.
+
+On the measurement host, physical GPU1 is on NUMA node 1; GPU0 is on node 0 and may be busy with ComfyUI. These correctness-test commands select only the ROCm backend on GPU1, not Vulkan, and bind CPU work and host allocations to node 1:
+
+```bash
+# Native q8_0 enabled where eligible:
+env -u CUDA_VISIBLE_DEVICES -u HIP_VISIBLE_DEVICES -u ROCR_VISIBLE_DEVICES \
+    -u GGML_GFX906_NO_Q8 \
+    numactl --cpunodebind=1 --membind=1 \
+    ./build_devmaster/bin/test-backend-ops test -b ROCm1 -o FLASH_ATTN_EXT
+
+# Same tests with q8_0 converted to fp16:
+env -u CUDA_VISIBLE_DEVICES -u HIP_VISIBLE_DEVICES -u ROCR_VISIBLE_DEVICES \
+    GGML_GFX906_NO_Q8=1 \
+    numactl --cpunodebind=1 --membind=1 \
+    ./build_devmaster/bin/test-backend-ops test -b ROCm1 -o FLASH_ATTN_EXT
+```
+
+For `llama-cli` or `llama-bench`, use `--device ROCm1` with the same visibility settings and NUMA binding. Check `--list-devices` before running on a different host; device numbering and NUMA topology are host-specific.
+
 ## hardware (measurement host)
 
 - Dell PowerEdge R740, 2x Intel Xeon Gold 6254 (Cascade Lake) @ 3.10GHz - 18 cores/socket, HT off, 36 cores total, 2 NUMA nodes
