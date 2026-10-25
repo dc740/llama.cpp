@@ -3,6 +3,7 @@
 #include "fattn-mma-f16.cuh"
 #include "fattn-tile.cuh"
 #include "fattn-vec.cuh"
+#include "fattn-gfx906.cuh"
 #include "fattn.cuh"
 
 #if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
@@ -517,6 +518,7 @@ enum best_fattn_kernel {
     BEST_FATTN_KERNEL_NONE    =   0,
     BEST_FATTN_KERNEL_TILE    = 200,
     BEST_FATTN_KERNEL_VEC     = 100,
+    BEST_FATTN_KERNEL_GFX906  = 300,
     BEST_FATTN_KERNEL_MMA_F16 = 400,
 };
 
@@ -633,6 +635,13 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
         return BEST_FATTN_KERNEL_NONE;
     }
 
+#ifdef GGML_USE_HIP
+    // gfx906 has no usable matrix instructions; it gets its own VALU kernel:
+    if (cc == GGML_CUDA_CC_VEGA20 && ggml_cuda_fattn_gfx906_eligible(dst)) {
+        return BEST_FATTN_KERNEL_GFX906;
+    }
+#endif // GGML_USE_HIP
+
     // For small batch sizes the vector kernel may be preferable over the kernels optimized for large batch sizes:
     // 192 satisfies % 64 == 0 but has no vec instance (DKQ != DV); force it onto the MMA path.
     const bool can_use_vector_kernel = Q->ne[0] <= 256 && Q->ne[0] % 64 == 0 && Q->ne[0] != 192 && K->ne[1] % FATTN_KQ_STRIDE == 0;
@@ -739,6 +748,7 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
 
     switch (kernel) {
         case BEST_FATTN_KERNEL_TILE:
+        case BEST_FATTN_KERNEL_GFX906:
         case BEST_FATTN_KERNEL_MMA_F16:
             need_f16_K = true;
             need_f16_V = true;
@@ -769,6 +779,11 @@ void ggml_cuda_flash_attn_ext(ggml_backend_cuda_context & ctx, ggml_tensor * dst
         case BEST_FATTN_KERNEL_VEC:
             ggml_cuda_flash_attn_ext_vec(ctx, dst);
             break;
+#ifdef GGML_USE_HIP
+        case BEST_FATTN_KERNEL_GFX906:
+            ggml_cuda_flash_attn_ext_gfx906(ctx, dst);
+            break;
+#endif // GGML_USE_HIP
         case BEST_FATTN_KERNEL_MMA_F16:
             ggml_cuda_flash_attn_ext_mma_f16(ctx, dst);
             break;
