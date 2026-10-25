@@ -422,6 +422,7 @@ struct llm_tokenizer_bpe : llm_tokenizer {
                 };
                 break;
             case LLAMA_VOCAB_PRE_TYPE_TEKKEN:
+            case LLAMA_VOCAB_PRE_TYPE_NEMOTRON_3_5_EMBD:
                 // original regex from tokenizer.json
                 // "[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]*[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]+|[^\\r\\n\\p{L}\\p{N}]?[\\p{Lu}\\p{Lt}\\p{Lm}\\p{Lo}\\p{M}]+[\\p{Ll}\\p{Lm}\\p{Lo}\\p{M}]*|\\p{N}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n/]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+"
                 regex_exprs = {
@@ -571,6 +572,10 @@ struct llm_tokenizer_bpe : llm_tokenizer {
                     "(?:'[sS]|'[tT]|'[rR][eE]|'[vV][eE]|'[mM]|'[lL][lL]|'[dD])|[^\\r\\n\\p{L}\\p{N}]?(?:\\p{L}|\\p{M}|\\u200C|\\u200D)+|\\p{N}{1,3}| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+",
                 };
                 break;
+            case LLAMA_VOCAB_PRE_TYPE_SOPRANO:
+                regex_exprs = { "\\p{N}", "\\s+|[\\p{L}\\p{N}_]+|[^\\p{L}\\p{N}_\\s]+" };
+                byte_encode = false;
+                break;
             case LLAMA_VOCAB_PRE_TYPE_WHITESPACE:
                 // whitespace pre-tokenizer (jinaai/jina-embeddings-v2-base-zh)
                 regex_exprs = {
@@ -637,11 +642,38 @@ struct llm_tokenizer_bpe_session {
     }
 
     virtual void tokenize(const std::string & text, std::vector<llama_token> & output) {
+        auto tok_pre = vocab.get_pre_type();
+
+        std::vector<std::string> word_collection;
+        if (tok_pre == LLAMA_VOCAB_PRE_TYPE_NEMOTRON_3_5_EMBD) {
+            static const std::string zwnj = "\xe2\x80\x8c";
+            std::string normalized_text = text;
+            replace_all(normalized_text, "[" + zwnj, "[");
+            replace_all(normalized_text, "<" + zwnj, "<");
+            word_collection = unicode_regex_split(normalized_text, tokenizer.regex_exprs, tokenizer.byte_encode);
+        } else if (tok_pre == LLAMA_VOCAB_PRE_TYPE_SOPRANO) {
+            std::string normalized_text;
+            bool space = false;
+            for (uint32_t cpt : unicode_cpts_from_utf8(text)) {
+                if (unicode_cpt_flags_from_cpt(cpt).is_whitespace) {
+                    if (!space) {
+                        normalized_text += ' ';
+                    }
+                    space = true;
+                } else {
+                    // Unicode full lowercase expands LATIN CAPITAL LETTER I WITH DOT ABOVE.
+                    normalized_text += cpt == 0x0130 ? "i\xcc\x87" : unicode_cpt_to_utf8(unicode_tolower(cpt));
+                    space = false;
+                }
+            }
+            word_collection = unicode_regex_split(normalized_text, tokenizer.regex_exprs, tokenizer.byte_encode);
+        } else {
+            word_collection = unicode_regex_split(text, tokenizer.regex_exprs, tokenizer.byte_encode);
+        }
+
         int final_prev_index = -1;
-        auto word_collection = unicode_regex_split(text, tokenizer.regex_exprs, tokenizer.byte_encode);
 
         symbols_final.clear();
-        auto tok_pre = vocab.get_pre_type();
 
         if (tok_pre == LLAMA_VOCAB_PRE_TYPE_MMBERT) {
             // Metaspace pre-tokenizer: a text starts with an escaped space, and each escaped space starts a new word
@@ -757,7 +789,9 @@ struct llm_tokenizer_bpe_session {
                 const std::string str = std::string(symbol.text, symbol.n);
                 const auto token = vocab.text_to_token(str);
 
-                if (token == LLAMA_TOKEN_NULL) {
+                if (token == LLAMA_TOKEN_NULL && tok_pre == LLAMA_VOCAB_PRE_TYPE_SOPRANO) {
+                    output.push_back(vocab.token_unk());
+                } else if (token == LLAMA_TOKEN_NULL) {
                     for (auto j = str.begin(); j != str.end(); ++j) {
                         llama_token token_multibyte = LLAMA_TOKEN_NULL;
                         if (tokenizer.byte_encode) {
@@ -2713,6 +2747,14 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
                 tokenizer_pre == "k2-horizon") {
                 pre_type = LLAMA_VOCAB_PRE_TYPE_K2_HORIZON;
                 clean_spaces = false;
+            } else if (
+                tokenizer_pre == "nemotron-3.5-embed") {
+                pre_type = LLAMA_VOCAB_PRE_TYPE_NEMOTRON_3_5_EMBD;
+                ignore_merges = true;
+                add_bos = true;
+            } else if (
+                tokenizer_pre == "soprano") {
+                pre_type = LLAMA_VOCAB_PRE_TYPE_SOPRANO;
             } else {
                 throw std::runtime_error(format("unknown pre-tokenizer type: '%s'", tokenizer_pre.c_str()));
             }
@@ -3264,6 +3306,10 @@ void llama_vocab::impl::load(llama_model_loader & ml, const LLM_KV & kv) {
 
                 attr = LLAMA_TOKEN_ATTR_USER_DEFINED;
             }
+        }
+
+        if (pre_type == LLAMA_VOCAB_PRE_TYPE_SOPRANO) {
+            special_eog_ids.insert(special_eos_id);
         }
 
         // sanity checks
@@ -4079,6 +4125,9 @@ int32_t llama_vocab::impl::token_to_piece(llama_token token, char * buf, int32_t
                     return _try_copy(token_text.data(), token_text.size());
                 }
                 if (attr & LLAMA_TOKEN_ATTR_NORMAL) {
+                    if (pre_type == LLAMA_VOCAB_PRE_TYPE_SOPRANO) {
+                        return _try_copy(token_text.data(), token_text.size());
+                    }
                     if (escape_whitespaces) {
                         // SPM-style BPE: tokens contain ▁ for spaces
                         std::string result = token_text;
