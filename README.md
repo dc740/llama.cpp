@@ -17,6 +17,16 @@
 
 </div>
 
+## Fork dev branches (dev-all)
+
+This fork keeps per-feature development branches merged into `dev-all` for local use:
+
+- `fa2-gfx906` - flash-attention-2 style kernel for gfx906 (MI50/MI60) in the HIP fattn path. No MFMA on this silicon; kernel uses VALU packed fp16, dot instructions, and LDS-tiled online softmax. Plan: `docs/gfx906-fa2-plan.md`. Candidate for upstream PR when validated.
+- `fa-mla-gfx906` - flash attention MLA (576/512) support for gfx906 tile kernels.
+- `numa-mirror-v2` - NUMA-aware host memory mirroring for large model offload.
+- `k3-iq1-types`, `k3-iq1-avx2` - Kimi K3 IQ1 quant type and AVX2 kernels.
+- `dev-master`, `dev-all` - integration branches combining the above.
+
 ## Quick start
 
 A few options to get `llama.cpp` installed on your machine:
