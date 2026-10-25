@@ -7,6 +7,7 @@
 | `k3-iq1-types` | unsloth IQ1_XS/IQ1_XXS/IQ1_XXXS tensor types (ids 64-66), scalar vec_dot - for Kimi-K3 UD quants |
 | `k3-iq1-avx2` | stacks on k3-iq1-types: AVX2/BMI2 vec_dot for the three types (verified bit-exact) |
 | `fa-mla-576` | fattn gate fix: MLA 576/512 routes to tile kernel when KV len is unaligned |
+| `fa2-gfx906` | FA2-style flash attention kernel for gfx906: LDS-tiled online softmax, v_dot2/v_pk_fma fp16, never materializes SxS (plan: docs/gfx906-fa2-plan.md) |
 
 ## measured (`dev-master`)
 
