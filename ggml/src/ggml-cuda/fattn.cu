@@ -754,10 +754,19 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
 
     switch (kernel) {
         case BEST_FATTN_KERNEL_TILE:
-        case BEST_FATTN_KERNEL_GFX906:
         case BEST_FATTN_KERNEL_MMA_F16:
             need_f16_K = true;
             need_f16_V = true;
+            break;
+        case BEST_FATTN_KERNEL_GFX906:
+#if defined(GGML_USE_HIP) && defined(FLASH_ATTN_AVAILABLE)
+            // q8_0 K/V are consumed natively by the pair kernel when possible:
+            need_f16_K = !fattn_gfx906_can_use_q8(K, K->ne[0]);
+            need_f16_V = !fattn_gfx906_can_use_q8(V, K->ne[0]);
+#else
+            need_f16_K = true;
+            need_f16_V = true;
+#endif // defined(GGML_USE_HIP) && defined(FLASH_ATTN_AVAILABLE)
             break;
         case BEST_FATTN_KERNEL_VEC: {
             const bool f16_fallback = ggml_cuda_get_fattn_vec_case(Q->ne[0], K->type, V->type) == nullptr;

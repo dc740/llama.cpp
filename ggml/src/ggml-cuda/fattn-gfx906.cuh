@@ -11,7 +11,10 @@
 //   - K/V tiles of 16 rows staged in LDS as half2 with +8 half2 row padding
 //   - online softmax in fp32, probs in fp16, PV partial sums folded into fp32
 //     accumulators at the end of each tile
-// Q arrives as fp32, K/V as fp16 (converted by launch_fattn), dst as fp32.
+//   - optional native q8_0 K/V path: K stays in q8_0 blocks, the KQ dot runs on
+//     v_dot4_i32_i8 against Q quantized to int8 per lane slice, q8_0 V is
+//     dequantized into the fp16 LDS tile during the load
+// Q arrives as fp32, K/V as fp16 or raw q8_0, dst as fp32.
 // Dispatch (fattn.cu) guarantees: cc == gfx906, DE == DV in {64, 128, 512},
 // Q/K/V nb[1..3] % 16 == 0 (16-byte aligned vectorized loads), ncols2 | gqa_ratio.
 
@@ -34,7 +37,8 @@ static __device__ __forceinline__ float fattn_gfx906_dot2(float acc, half2 a, ha
 
 // Pair kernel for DE in {64, 128}: SPLIT lanes share one Q row, each owns
 // DE/SPLIT head dims; the partial dots are reduced via __shfl_xor.
-template<int DE, int ncols1, int ncols2, bool use_logit_softcap>
+// KQ8/VQ8: K/V arrive as raw q8_0 block rows instead of converted fp16.
+template<int DE, int ncols1, int ncols2, bool use_logit_softcap, bool KQ8 = false, bool VQ8 = false>
 __launch_bounds__(ncols1*ncols2*4)
 static __global__ void flash_attn_gfx906(
         const char * Q_ptr,
@@ -75,6 +79,8 @@ static __global__ void flash_attn_gfx906(
     constexpr int DQ     = DH/2;            // half2 per lane
     constexpr int D2     = DE/2;            // half2 per K/V row
     constexpr int CPR    = DE/8;            // uint4 chunks per K/V row
+    constexpr int NB     = DE/32;           // q8_0 blocks per K/V row
+    constexpr int QW     = DH/4;            // packed i8 words of Q per lane
 
     static_assert(DE == 64 || DE == 128, "bad DE");
     static_assert(TILE_M*SPLIT % 32 == 0, "bad TILE_M");
@@ -97,21 +103,48 @@ static __global__ void flash_attn_gfx906(
     const char * V_h = V + nb23*sequence + nb22*kvh;
     const bool live  = qg < int(ne01.z);
 
-    __shared__ __align__(16) half2 sK[TILE_N][D2 + 8];
-    __shared__ __align__(16) half2 sV[TILE_N][D2 + 8];
+    __shared__ __align__(16) half2  sK [KQ8 ? 1 : TILE_N][D2 + 8];
+    __shared__ __align__(16) int8_t sKq[KQ8 ? TILE_N : 1][DE];   // q8_0 quants only
+    __shared__ __align__(16) half   sKd[KQ8 ? TILE_N : 1][NB];   // q8_0 block scales
+    __shared__ __align__(16) half2  sV [TILE_N][D2 + 8];
 
     const half * maskh = mask ? (const half *) (mask + nb33*(sequence % ne33) + nb31*qg) : nullptr;
     const float slope = ncols2 == 1 ? get_alibi_slope(max_bias, head, n_head_log2, m0, m1) : 1.0f;
 
-    // Q row slice -> fp16 registers, scale folded in:
-    half2 qreg[DQ] = {};
+    // Q row slice -> fp16 registers, scale folded in. For the q8_0 K path the
+    // lane's DH dims are quantized to int8 instead; they always lie inside the
+    // single K block sub*DH/32, so one lane-local scale is enough.
+    half2 qreg[KQ8 ? 1 : DQ] = {};
+    int   q8i [KQ8 ? QW : 1] = {};
+    float q8d = 0.0f;
     if (live) {
         const float4 * qp = (const float4 *) (Q + nb01*qg + nb02*head + nb03*sequence + sub*DH*int32_t(sizeof(float)));
+        if constexpr (KQ8) {
+            float amax = 0.0f;
 #pragma unroll
-        for (int d4 = 0; d4 < DH/4; ++d4) {
-            const float4 f = qp[d4];
-            qreg[2*d4 + 0] = __floats2half2_rn(f.x*scale, f.y*scale);
-            qreg[2*d4 + 1] = __floats2half2_rn(f.z*scale, f.w*scale);
+            for (int d4 = 0; d4 < DH/4; ++d4) {
+                const float4 f = qp[d4];
+                amax = fmaxf(amax, fmaxf(fmaxf(fabsf(f.x), fabsf(f.y)), fmaxf(fabsf(f.z), fabsf(f.w))));
+            }
+            const float a127 = amax > 0.0f ? 127.0f/amax : 0.0f;
+            q8d = amax*scale/127.0f;
+#pragma unroll
+            for (int w = 0; w < QW; ++w) {
+                const float4 f = qp[w];
+                int v = 0;
+                v |= int(uint8_t(int8_t(roundf(f.x*a127))));
+                v |= int(uint8_t(int8_t(roundf(f.y*a127)))) <<  8;
+                v |= int(uint8_t(int8_t(roundf(f.z*a127)))) << 16;
+                v |= int(uint8_t(int8_t(roundf(f.w*a127)))) << 24;
+                q8i[w] = v;
+            }
+        } else {
+#pragma unroll
+            for (int d4 = 0; d4 < DH/4; ++d4) {
+                const float4 f = qp[d4];
+                qreg[2*d4 + 0] = __floats2half2_rn(f.x*scale, f.y*scale);
+                qreg[2*d4 + 1] = __floats2half2_rn(f.z*scale, f.w*scale);
+            }
         }
     }
 
@@ -122,16 +155,59 @@ static __global__ void flash_attn_gfx906(
     for (int k0 = blockIdx.y*FATTN_GFX906_NBATCH_FA; k0 < k_VKQ_max; k0 += gridDim.y*FATTN_GFX906_NBATCH_FA) {
         const int k_lim = min(k0 + FATTN_GFX906_NBATCH_FA, k_VKQ_max);
         for (int n0 = k0; n0 < k_lim; n0 += TILE_N) {
-            // cooperative K,V tile load (uint4 = 8 fp16 values each):
-            for (int c = tid; c < TILE_N*CPR; c += TILE_M*SPLIT) {
-                const int i = c / CPR;
-                const int kv = n0 + i;
-                if (kv < k_lim) {
-                    const int off = (c % CPR);
-                    *reinterpret_cast<uint4 *>(&sK[i][off*4]) =
-                        reinterpret_cast<const uint4 *>(K_h + (int64_t) kv*nb11)[off];
-                    *reinterpret_cast<uint4 *>(&sV[i][off*4]) =
-                        reinterpret_cast<const uint4 *>(V_h + (int64_t) kv*nb21)[off];
+            // cooperative K,V tile load. fp16 rows copy as uint4 (8 fp16 each).
+            // q8_0 rows are 34B blocks (half scale + 32 i8); the qs sit at odd
+            // byte offsets so they move as ushort pairs into split LDS arrays.
+            if constexpr (KQ8) {
+                for (int c = tid; c < TILE_N*9*NB; c += TILE_M*SPLIT) {
+                    const int i  = c / (9*NB);
+                    const int kv = n0 + i;
+                    if (kv < k_lim) {
+                        const int u = c % (9*NB);
+                        const int b = u/9, o = u%9;
+                        const unsigned short * row16 = reinterpret_cast<const unsigned short *>(K_h + (int64_t) kv*nb11);
+                        if (o == 0) {
+                            sKd[i][b] = reinterpret_cast<const half *>(row16)[b*17];
+                        } else {
+                            reinterpret_cast<uint *>(sKq[i])[b*8 + o - 1] =
+                                row16[b*17 + 2*o - 1] | (unsigned(row16[b*17 + 2*o]) << 16);
+                        }
+                    }
+                }
+            }
+            if constexpr (VQ8) {
+                for (int c = tid; c < TILE_N*8*NB; c += TILE_M*SPLIT) {
+                    const int i  = c / (8*NB);
+                    const int kv = n0 + i;
+                    if (kv < k_lim) {
+                        const int u = c % (8*NB);
+                        const int b = u/8, w = u%8;
+                        const unsigned short * row16 = reinterpret_cast<const unsigned short *>(V_h + (int64_t) kv*nb21);
+                        const float d = __half2float(reinterpret_cast<const half *>(row16)[b*17]);
+                        const unsigned short u0 = row16[b*17 + 2*w + 1];
+                        const unsigned short u1 = row16[b*17 + 2*w + 2];
+                        __align__(8) half2 hv[2];
+                        hv[0] = __floats2half2_rn(d*(int8_t) (u0 & 0xFF), d*(int8_t) (u0 >> 8));
+                        hv[1] = __floats2half2_rn(d*(int8_t) (u1 & 0xFF), d*(int8_t) (u1 >> 8));
+                        reinterpret_cast<uint2 *>(sV[i])[b*8 + w] = *reinterpret_cast<uint2 *>(hv);
+                    }
+                }
+            }
+            if constexpr (!KQ8 || !VQ8) {
+                for (int c = tid; c < TILE_N*CPR; c += TILE_M*SPLIT) {
+                    const int i = c / CPR;
+                    const int kv = n0 + i;
+                    if (kv < k_lim) {
+                        const int off = (c % CPR);
+                        if constexpr (!KQ8) {
+                            *reinterpret_cast<uint4 *>(&sK[i][off*4]) =
+                                reinterpret_cast<const uint4 *>(K_h + (int64_t) kv*nb11)[off];
+                        }
+                        if constexpr (!VQ8) {
+                            *reinterpret_cast<uint4 *>(&sV[i][off*4]) =
+                                reinterpret_cast<const uint4 *>(V_h + (int64_t) kv*nb21)[off];
+                        }
+                    }
                 }
             }
             __syncthreads();
@@ -143,16 +219,30 @@ static __global__ void flash_attn_gfx906(
                 float m_new = m;
 #pragma unroll 8
                 for (int i = 0; i < nmax; ++i) {
-                    float a0 = 0.0f, a1 = 0.0f;
+                    float pd;
+                    if constexpr (KQ8) {
+                        // i8 x i8 -> s32 dots; lane dims sit inside K block
+                        // sub*DH/32, so a lane-local Q scale is exact:
+                        const int * kq = reinterpret_cast<const int *>(sKq[i] + sub*DH);
+                        int s0 = 0, s1 = 0;
 #pragma unroll
-                    for (int d2 = 0; d2 < DQ; d2 += 4) {
-                        const int d2h = sub*DQ + d2;
-                        a0 = fattn_gfx906_dot2(a0, qreg[d2],     sK[i][d2h]);
-                        a0 = fattn_gfx906_dot2(a0, qreg[d2 + 2], sK[i][d2h + 2]);
-                        a1 = fattn_gfx906_dot2(a1, qreg[d2 + 1], sK[i][d2h + 1]);
-                        a1 = fattn_gfx906_dot2(a1, qreg[d2 + 3], sK[i][d2h + 3]);
+                        for (int w = 0; w < QW; w += 2) {
+                            s0 = ggml_cuda_dp4a(q8i[w],     kq[w],     s0);
+                            s1 = ggml_cuda_dp4a(q8i[w + 1], kq[w + 1], s1);
+                        }
+                        pd = (s0 + s1)*(q8d*__half2float(sKd[i][sub*DH/32]));
+                    } else {
+                        float a0 = 0.0f, a1 = 0.0f;
+#pragma unroll
+                        for (int d2 = 0; d2 < DQ; d2 += 4) {
+                            const int d2h = sub*DQ + d2;
+                            a0 = fattn_gfx906_dot2(a0, qreg[d2],     sK[i][d2h]);
+                            a0 = fattn_gfx906_dot2(a0, qreg[d2 + 2], sK[i][d2h + 2]);
+                            a1 = fattn_gfx906_dot2(a1, qreg[d2 + 1], sK[i][d2h + 1]);
+                            a1 = fattn_gfx906_dot2(a1, qreg[d2 + 3], sK[i][d2h + 3]);
+                        }
+                        pd = a0 + a1;
                     }
-                    float pd = a0 + a1;
 #pragma unroll
                     for (int s = SPLIT/2; s > 0; s >>= 1) {
                         pd += __shfl_xor(pd, s);
@@ -457,17 +547,42 @@ static __global__ void flash_attn_gfx906_512(
     GGML_UNUSED_VARS(ne00, ne03, ne10, ne13, ne31, ne32, nb32);
 }
 
+// The pair kernel consumes q8_0 K/V natively; the D == 512 kernel and rows
+// whose strides break the 2B-aligned ushort loads keep the fp16 conversion.
+// GGML_GFX906_NO_Q8 forces the fp16 conversion path back on (A/B knob).
+static bool fattn_gfx906_can_use_q8(const ggml_tensor * t, const int64_t head_size) {
+    if (head_size == 512 || t->type != GGML_TYPE_Q8_0 || (uintptr_t) t->data % 2 != 0) {
+        return false;
+    }
+    for (size_t i = 1; i < GGML_MAX_DIMS; ++i) {
+        if (t->nb[i] % 2 != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 template<int DKQ, int ncols1, int ncols2, bool use_logit_softcap>
 static void ggml_cuda_flash_attn_ext_gfx906_sc(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+    const ggml_tensor * K = dst->src[1];
+    const ggml_tensor * V = dst->src[2];
+
+    const bool k_q8 = fattn_gfx906_can_use_q8(K, DKQ);
+    const bool v_q8 = fattn_gfx906_can_use_q8(V, DKQ);
+
     constexpr int nthreads = DKQ == 512 ? ncols1*ncols2*16 : ncols1*ncols2*4;
     fattn_kernel_t fattn_kernel;
     if constexpr (DKQ == 512) {
         fattn_kernel = flash_attn_gfx906_512<ncols1, ncols2, use_logit_softcap>;
+    } else if (k_q8) {
+        fattn_kernel = v_q8 ? (fattn_kernel_t) flash_attn_gfx906<DKQ, ncols1, ncols2, use_logit_softcap, true,  true>
+                            : (fattn_kernel_t) flash_attn_gfx906<DKQ, ncols1, ncols2, use_logit_softcap, true,  false>;
     } else {
-        fattn_kernel = flash_attn_gfx906<DKQ, ncols1, ncols2, use_logit_softcap>;
+        fattn_kernel = v_q8 ? (fattn_kernel_t) flash_attn_gfx906<DKQ, ncols1, ncols2, use_logit_softcap, false, true>
+                            : (fattn_kernel_t) flash_attn_gfx906<DKQ, ncols1, ncols2, use_logit_softcap, false, false>;
     }
     launch_fattn<DKQ, ncols1, ncols2>
-        (ctx, dst, fattn_kernel, nthreads/32, 0, FATTN_GFX906_NBATCH_FA, true, true, false, false, 32);
+        (ctx, dst, fattn_kernel, nthreads/32, 0, FATTN_GFX906_NBATCH_FA, !k_q8, !v_q8, false, false, 32);
 }
 
 template<int DKQ, int ncols1, int ncols2>
@@ -502,7 +617,8 @@ static bool ggml_cuda_fattn_gfx906_eligible(const ggml_tensor * dst) {
         return false;
     }
     for (const ggml_tensor * t : {Q, K, V}) {
-        // K/V tensors not in fp16 are converted to contiguous fp16 by launch_fattn:
+        // quant K/V either stay q8_0 for the native path or are converted to
+        // contiguous fp16 by launch_fattn, so their strides are not checked here:
         if (t->type != GGML_TYPE_F16 && t->type != GGML_TYPE_F32) {
             continue;
         }
