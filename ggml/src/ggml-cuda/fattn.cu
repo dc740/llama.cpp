@@ -625,8 +625,14 @@ static best_fattn_kernel ggml_cuda_get_best_fattn_kernel(const int device, const
     }
 
     if (mla_tile_only) {
-        // MLA (576/512) with unaligned KV: only the tile kernel bounds-checks its loads.
-        return BEST_FATTN_KERNEL_TILE;
+        // MLA (576/512) with unaligned KV strides: only the tile kernel bounds-checks its loads.
+        // But its 576/512 instantiation exists only in the GQA-opt variant, which needs a mask, no
+        // bias, padded KV, and a GQA ratio multiple of 4 (launch_fattn_tile_switch_ncols2). Anything
+        // else aborts at launch - report no kernel instead.
+        if (mask && max_bias == 0.0f && K->ne[1] % FATTN_KQ_STRIDE == 0 && gqa_ratio % 4 == 0) {
+            return BEST_FATTN_KERNEL_TILE;
+        }
+        return BEST_FATTN_KERNEL_NONE;
     }
 
     if (mask && mask->ne[2] != 1) {
