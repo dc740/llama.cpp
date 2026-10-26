@@ -75,7 +75,13 @@ static __global__ void flash_attn_ext_vec(
 #ifdef RDNA
     constexpr int nthreads_KQ_q = 2;
 #else
+    // gfx906: for D == 256 halving the per-lane dp4a chain (8 lanes per dot
+    // instead of 4) shortens the serial KQ phase.
+#if defined(__gfx906__)
+    constexpr int nthreads_KQ_q = D == 256 ? 8 : 4;
+#else
     constexpr int nthreads_KQ_q = 4;
+#endif // __gfx906__
 #endif // RDNA
     constexpr int nthreads_V_q  = (D/4 < 32 ? D/4 : 32);
 #else
