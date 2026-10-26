@@ -5,9 +5,7 @@
 #include "mmq.cuh"
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q1_0(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -118,9 +116,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_0(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -209,9 +205,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_0(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -274,9 +268,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_1(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -339,9 +331,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_0(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -421,9 +411,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_1(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -500,8 +488,8 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
     }
 }
 
-template <ggml_type type, int J, bool fallback, bool has_fusion> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q8_0(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q8_0(
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -531,7 +519,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q8_0 * bxi = ggml_cuda_mmq_x_row<block_q8_0, has_fusion>(x, x_gate, kbx0, i, stride) + kbx;
+        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + i*stride + kbx;
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_qs[i*sram_stride + 0             + txi] = get_int_b2(bxi[0].qs,                   kqsx);
@@ -554,7 +542,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q8_0 * bxi = ggml_cuda_mmq_x_row<block_q8_0, has_fusion>(x, x_gate, kbx0, i, stride) + kbxd;
+        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + i*stride + kbxd;
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_df[i*sram_stride                           + kbxd] = bxi->d;
@@ -567,9 +555,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
 // ---------------------------------------------------------------------------------------------
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_K(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -630,9 +616,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q3_K(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -744,8 +728,8 @@ static __device__ __forceinline__ int unpack_scales_q45_K(const int * scales, co
            ((scales[ksc/2]              >> (2 * (ksc % 2)))       & 0x30303030);  // upper 2 bits
 }
 
-template <ggml_type type, int J, bool fallback, bool has_fusion> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_K(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_K(
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -773,7 +757,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q4_K * bxi = ggml_cuda_mmq_x_row<block_q4_K, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride;
         const int qs0 = get_int_b4(bxi->qs, txi);
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
@@ -802,7 +786,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
                 i = min(i, i_max);
             }
 
-            const block_q4_K * bxi = ggml_cuda_mmq_x_row<block_q4_K, has_fusion>(x, x_gate, kbx0, i, stride);
+            const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride;
 
             const int * scales = (const int *) bxi->scales;
             const int ksc = threadIdx.x % 2;
@@ -830,7 +814,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q4_K * bxi = ggml_cuda_mmq_x_row<block_q4_K, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride;
 
         x_dm[i] = bxi->dm;
     }
@@ -843,7 +827,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q4_K * bxi = ggml_cuda_mmq_x_row<block_q4_K, has_fusion>(x, x_gate, kbx0, i, stride) + (threadIdx.x % (MMQ_TILE_NE_K/8)) / (QI4_K/8);
+        const block_q4_K * bxi = (const block_q4_K *) x + kbx0 + i*stride + (threadIdx.x % (MMQ_TILE_NE_K/8)) / (QI4_K/8);
 
         const int * scales = (const int *) bxi->scales;
 
@@ -855,8 +839,8 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
 #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
 }
 
-template <ggml_type type, int J, bool fallback, bool has_fusion> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_K(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_K(
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -884,7 +868,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q5_K * bxi = ggml_cuda_mmq_x_row<block_q5_K, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_q5_K * bxi = (const block_q5_K *) x + kbx0 + i*stride;
         const int ky = QR5_K*txi;
 
         const int ql = get_int_b4(bxi->qs, txi);
@@ -925,7 +909,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
                 i = min(i, i_max);
             }
 
-            const block_q5_K * bxi = ggml_cuda_mmq_x_row<block_q5_K, has_fusion>(x, x_gate, kbx0, i, stride);
+            const block_q5_K * bxi = (const block_q5_K *) x + kbx0 + i*stride;
 
             const int * scales = (const int *) bxi->scales;
             const int ksc = threadIdx.x % 2;
@@ -953,7 +937,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q5_K * bxi = ggml_cuda_mmq_x_row<block_q5_K, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_q5_K * bxi = (const block_q5_K *) x + kbx0 + i*stride;
 
         x_dm[i] = bxi->dm;
     }
@@ -967,7 +951,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q5_K * bxi = ggml_cuda_mmq_x_row<block_q5_K, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_q5_K * bxi = (const block_q5_K *) x + kbx0 + i*stride;
 
         const int * scales = (const int *) bxi->scales;
 
@@ -979,8 +963,8 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
 #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
 }
 
-template <ggml_type type, int J, bool fallback, bool has_fusion> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q6_K(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q6_K(
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1009,7 +993,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q6_K * bxi = ggml_cuda_mmq_x_row<block_q6_K, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_q6_K * bxi = (const block_q6_K *) x + kbx0 + i*stride;
 
         const int ql = get_int_b2(bxi->ql, txi);
         const int ql0 = (ql >> 0) & 0x0F0F0F0F;
@@ -1039,7 +1023,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q6_K * bxi = ggml_cuda_mmq_x_row<block_q6_K, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_q6_K * bxi = (const block_q6_K *) x + kbx0 + i*stride;
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_df[i*sram_stride]                     = bxi->d;
@@ -1057,7 +1041,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_q6_K * bxi = ggml_cuda_mmq_x_row<block_q6_K, has_fusion>(x, x_gate, kbx0, i, stride) + (threadIdx.x % (MMQ_TILE_NE_K/8)) / 4;
+        const block_q6_K * bxi = (const block_q6_K *) x + kbx0 + i*stride + (threadIdx.x % (MMQ_TILE_NE_K/8)) / 4;
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_sc[i*sram_stride + threadIdx.x%4] = get_int_b2(bxi->scales, threadIdx.x % (MMQ_TILE_NE_K/8));
@@ -1070,9 +1054,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
 // ---------------------------------------------------------------------------------------------
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq1_s(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1134,9 +1116,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_xxs(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1200,9 +1180,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_xs(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1267,9 +1245,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_s(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1337,9 +1313,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq3_xxs(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1403,9 +1377,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq3_s(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1473,8 +1445,8 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
     }
 }
 
-template <ggml_type type, int J, bool fallback, bool has_fusion> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_xs(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
+template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_xs(
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1501,7 +1473,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_iq4_xs * bxi = ggml_cuda_mmq_x_row<block_iq4_xs, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_iq4_xs * bxi = (const block_iq4_xs *) x + kbx0 + i*stride;
 
         const int aux_q4 = get_int_b4(bxi->qs, kqsx);
         const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
@@ -1525,7 +1497,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
             i = min(i, i_max);
         }
 
-        const block_iq4_xs * bxi = ggml_cuda_mmq_x_row<block_iq4_xs, has_fusion>(x, x_gate, kbx0, i, stride);
+        const block_iq4_xs * bxi = (const block_iq4_xs *) x + kbx0 + i*stride;
 
         const float d = __half2float(bxi->d);
 
@@ -1541,9 +1513,7 @@ template <ggml_type type, int J, bool fallback, bool has_fusion> static __device
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_nl(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1612,9 +1582,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 // ---------------------------------------------------------------------------------------------
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_mxfp4(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
@@ -1681,9 +1649,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_mxfp4_fp4(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q4) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q4);
@@ -1725,9 +1691,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
 }
 
 template <ggml_type type, int J, bool fallback, ggml_prec prec_src1> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_nvfp4(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kb0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kb0, const int i_max, const int stride) {
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
     constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
@@ -1783,9 +1747,7 @@ template <ggml_type type, int J, bool fallback, ggml_prec prec_src1> static __de
 }
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_nvfp4_nvfp4(
-        const char * __restrict__ x, const char * __restrict__ x_gate, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
-    GGML_UNUSED(x_gate);
-
+        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
     constexpr int warp_size       = ggml_cuda_get_physical_warp_size();
     constexpr int nwarps          = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q4) / warp_size;
     constexpr int I               = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q4);
