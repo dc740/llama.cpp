@@ -46,14 +46,17 @@ Source-level knobs that matter (not env vars - compile-time `#define`):
 
 ## gfx906 attention controls
 
-Flash attention must be enabled with `--flash-attn on`. Eligible gfx906 operations use the custom kernel automatically; unsupported shapes keep the stock path. Native q8_0 K/V is supported for head dimensions 64 and 128, not 256 or 512. The Qwen3.8-27B GGUF on this host has head dimension 256, so it does not exercise this kernel.
+Flash attention must be enabled with `--flash-attn on`. Eligible gfx906 operations use the custom kernel automatically; unsupported shapes keep the stock path. Native q8_0 K/V is supported for head dimensions 64 and 128, plus experimental 256 when explicitly enabled. D512 still converts quantized KV to fp16. The fitting Qwen3.8-27B and Qwen3.6-35B-A3B GGUFs have head dimension 256 and keep stock attention by default.
 
 | environment variable | purpose and behavior |
 |---|---|
 | `GGML_GFX906_NO_Q8` | A/B or troubleshooting switch: when set, disables native q8_0 K/V and restores conversion to fp16 before custom attention. Does not disable flash attention itself. Unset by default, allowing native q8_0 on eligible inputs. Conversion needs extra scratch memory and can be slower. |
+| `GGML_GFX906_D256` | Experimental opt-in: set to `1` before startup to route eligible D256 attention through the custom kernel. Leave unset for stock dispatch. Correctness tests pass, but Qwen27B/35B benchmarks at 8K KV depth regress, so this is for development, not a recommended speed setting. |
 | `CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES` | GPU visibility filters that can change device numbering. With `CUDA_VISIBLE_DEVICES=1`, physical GPU1 appears as process-local `ROCm0`. Leave these unset when selecting physical GPU1 by its unremapped `ROCm1` name. |
 
 `GGML_GFX906_NO_Q8` is read once per process. Any set value, including `0` or an empty string, disables native q8_0; use `unset GGML_GFX906_NO_Q8` to restore it and restart the process.
+
+`GGML_GFX906_D256` also uses presence semantics and is cached per process; unset it and restart to restore stock D256 dispatch. To exercise D256 in the tests below, add `GGML_GFX906_D256=1` to each `env` command. These switches have no effect on other GPU architectures.
 
 On the measurement host, physical GPU1 is on NUMA node 1; GPU0 is on node 0 and may be busy with ComfyUI. These correctness-test commands select only the ROCm backend on GPU1, not Vulkan, and bind CPU work and host allocations to node 1:
 
