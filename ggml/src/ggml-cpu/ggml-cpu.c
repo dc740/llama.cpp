@@ -1120,7 +1120,9 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
     int64_t t1 = ggml_time_us();
     const double local_before = ggml_numa_mirror_local_fraction(base, size, home);
     if (local_before < 0.0) {
-        // move_pages query failed - placement is unknown, do not attempt migration or report a bogus percentage
+        // move_pages query failed - placement is unknown, do not attempt migration or report a bogus percentage,
+        // but still set MPOL_BIND so pages faulted later land on the home node instead of ~50/50 across nodes
+        ggml_numa_mirror_bind_pages(base, size, home, false);
         GGML_NUMA_MIRROR_LOG_WARN(
             "cannot probe the primary buffer's page placement (move_pages failed) - "
             "if the model is not already on node %d, launch with `numactl --membind=%d`\n", home, home);
