@@ -91,6 +91,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 static_assert(sizeof(half) == sizeof(ggml_fp16_t), "wrong fp16 size");
@@ -3062,6 +3063,61 @@ static int ggml_cuda_try_gdn_cache_fusion(
     return skip;
 }
 
+// the gather at cgraph->nodes[i] can be skipped when it is a one-row recurrent-state
+// get_rows whose only consumers are views feeding the state input of gated_delta_net
+// (which reads the cache row itself, see ggml_cuda_gdn_fused_state_src) and the empty
+// extra-state copy that a single-row gather leaves
+static bool ggml_cuda_gdn_state_gather_fused(const ggml_cgraph * cgraph, int i, ggml_backend_buffer_type_t buft) {
+    const ggml_tensor * gr = cgraph->nodes[i];
+    if (gr->op != GGML_OP_GET_ROWS || gr->type != GGML_TYPE_F32 ||
+        (gr->flags & GGML_TENSOR_FLAG_OUTPUT)) {
+        return false;
+    }
+    // tensors aliasing the gather output
+    std::unordered_set<const ggml_tensor *> aliased = { gr };
+    bool seen_gdn = false;
+    for (int j = i + 1; j < cgraph->n_nodes; ++j) {
+        const ggml_tensor * n = cgraph->nodes[j];
+        if (n->view_src != nullptr && aliased.count(n->view_src)) {
+            // an op that writes into the gather buffer would change the state the
+            // kernel reads straight from the cache; only plain views may alias it
+            if (!ggml_cuda_is_view_or_noop(n) || (n->flags & GGML_TENSOR_FLAG_OUTPUT)) {
+                return false;
+            }
+            aliased.insert(n);
+            continue;
+        }
+        int n_aliased_src = 0, last_src = -1;
+        for (int s = 0; s < GGML_MAX_SRC; ++s) {
+            if (n->src[s] != nullptr && aliased.count(n->src[s])) {
+                ++n_aliased_src;
+                last_src = s;
+            }
+        }
+        if (n_aliased_src == 0) {
+            continue;
+        }
+        if (n->flags & GGML_TENSOR_FLAG_OUTPUT) {
+            return false;
+        }
+        if (n->op == GGML_OP_GATED_DELTA_NET && n_aliased_src == 1 && last_src == 5) {
+            ggml_cuda_gated_delta_net_fused_state fused_state;
+            if (!ggml_cuda_gdn_fused_state_src(n, buft, fused_state)) {
+                return false;
+            }
+            seen_gdn = true;
+            continue;
+        }
+        // the extra-state copy is empty when the gather holds a single row
+        if (n->op == GGML_OP_CPY && n_aliased_src == 1 && last_src == 0 &&
+            ggml_nelements(n->src[0]) == 0) {
+            continue;
+        }
+        return false;
+    }
+    return seen_gdn;
+}
+
 // match ssm_scan + the strided cpy that scatters its state snapshots into the cache, so the kernel writes them and skips the cpy
 static int ggml_cuda_try_ssm_scan_cache_fusion(
         const ggml_cgraph * cgraph, int node_idx, ggml_cuda_ssm_scan_fused_cache & fused_state_cpy) {
@@ -4817,6 +4873,13 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                 }
 
                 if ((node->flags & GGML_TENSOR_FLAG_COMPUTE) == 0) {
+                    continue;
+                }
+
+                // skip a recurrent-state gather whose consuming gated_delta_net
+                // reads the cache row in-kernel
+                if (node->op == GGML_OP_GET_ROWS && !ggml_cuda_fusion_disabled() &&
+                    ggml_cuda_gdn_state_gather_fused(cgraph, i, ggml_backend_cuda_buffer_type(cuda_ctx->device))) {
                     continue;
                 }
 

@@ -140,7 +140,9 @@ static __global__ __launch_bounds__(256, BLOCKS) void gdn_single(ggml_cuda_gdn_m
     const int                                      h     = (blockIdx.x / (D / V)) % a.H;
     const int                                      seq   = blockIdx.x / ((D / V) * a.H);
     const int                                      v0    = slice * V;
-    const int64_t                                  soff  = ((int64_t) seq * a.H + h) * D * D;
+    const int64_t                                  soff  = (a.state_ids ? (int64_t) a.state_ids[seq] * a.state_stride
+                                                                         : (int64_t) seq * a.H * D * D)
+                                                          + (int64_t) h * D * D;
     const int64_t                                  qoff  = (seq / a.rq3) * a.sq3 + (h % a.H_k) * a.sq1;
     const int64_t                                  voff  = seq * a.sv3 + h * a.sv1 + v0;
     const int64_t                                  goff  = seq * a.sb3 + h * a.sb1;
