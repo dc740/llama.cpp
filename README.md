@@ -8,6 +8,15 @@
 | `k3-iq1-avx2` | stacks on k3-iq1-types: AVX2/BMI2 vec_dot for the three types (verified bit-exact) |
 | `fa-mla-576` | fattn gate fix: MLA 576/512 routes to tile kernel when KV len is unaligned |
 | `fa2-gfx906` | FA2-style flash attention kernel for gfx906: LDS-tiled online softmax, v_dot2/v_pk_fma fp16, never materializes SxS (plan: docs/gfx906-fa2-plan.md) |
+| `fix-llama-bench-markers` | drops a merge conflict marker committed into llama-bench usage output |
+| `gfx906-vec-d256` | stock VEC attention nthreads_KQ_q 4->8 for D==256 on gfx906 (+0.6/+1.5% tg) |
+| `fa2-gfx906-d256` | gated D256 attention experiments (pair + lane-per-key kernels, q8 tile loaders); correct but slower than stock, OFF by default behind env gates |
+| `gfx906-mmvq` | GCN matvec/MoE launch tuning for gfx906 (+3.7% tg on Qwen27B) |
+| `gfx906-opprof` | env-gated per-op event profiler `GGML_GFX906_OP_PROF` + round-4 profile map |
+| `gfx906-gdn-state` | fused gated-delta-net state slot read (kills per-layer GET_ROWS; +4.3/+8.0% tg) |
+| `gfx906-moe-n1` | packed batch-1 MoE expert matvec `mul_mat_vec_q_moe_n1` (+14.5% tg on Qwen35B-A3B) |
+| `gfx906-vecdot-attempt` | docs only: vec_dot instruction-reduction attempt (negative result, reverted) |
+| `fix-iq4nl-vdr` | vec_dot_iq4_nl_q8_1 uses VDR_IQ4_NL_Q8_1_MMVQ instead of the borrowed Q4_0 constant |
 
 ## measured (`dev-master`)
 
