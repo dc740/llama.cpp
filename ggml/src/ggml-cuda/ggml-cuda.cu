@@ -4664,6 +4664,66 @@ static int ggml_cuda_try_fuse(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph 
     return 0;
 }
 
+
+// GGML_GFX906_OP_PROF=1: env-gated per-node op profiler (dev tool, no-op when unset).
+// Wraps each op dispatch with stream events, aggregates elapsed GPU time per node name,
+// dumps a sorted table at process exit. Not valid with CUDA graphs (skipped there).
+static bool ggml_cuda_op_prof_enabled() {
+    static const bool enabled = getenv("GGML_GFX906_OP_PROF") != nullptr;
+    return enabled;
+}
+
+struct ggml_cuda_op_prof_entry {
+    cudaEvent_t ev0;
+    cudaEvent_t ev1;
+    std::string name;
+};
+
+static std::vector<ggml_cuda_op_prof_entry>                ggml_cuda_op_prof_pending;
+static std::map<std::string, std::pair<double, int64_t>>   ggml_cuda_op_prof_total;
+
+static void ggml_cuda_op_prof_flush(cudaStream_t stream) {
+    if (ggml_cuda_op_prof_pending.empty()) {
+        return;
+    }
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    for (const ggml_cuda_op_prof_entry & e : ggml_cuda_op_prof_pending) {
+        float ms = 0.0f;
+        CUDA_CHECK(hipEventElapsedTime(&ms, e.ev0, e.ev1));
+        auto & t = ggml_cuda_op_prof_total[e.name];
+        t.first += ms;
+        t.second += 1;
+        CUDA_CHECK(cudaEventDestroy(e.ev0));
+        CUDA_CHECK(cudaEventDestroy(e.ev1));
+    }
+    ggml_cuda_op_prof_pending.clear();
+}
+
+static void ggml_cuda_op_prof_dump() {
+    if (ggml_cuda_op_prof_total.empty()) {
+        return;
+    }
+    std::vector<std::pair<std::string, std::pair<double, int64_t>>> rows(
+        ggml_cuda_op_prof_total.begin(), ggml_cuda_op_prof_total.end());
+    std::sort(rows.begin(), rows.end(), [](const auto & a, const auto & b) {
+        return a.second.first > b.second.first;
+    });
+    double total_ms = 0.0;
+    for (const auto & r : rows) { total_ms += r.second.first; }
+    fprintf(stderr, "=== GGML_GFX906_OP_PROF: total %.1f ms over %zu keys ===\n", total_ms, rows.size());
+    for (const auto & r : rows) {
+        fprintf(stderr, "%10.3f ms %8lld calls  %s\n",
+                r.second.first, (long long) r.second.second, r.first.c_str());
+    }
+}
+
+static bool ggml_cuda_op_prof_registered = [] {
+    if (getenv("GGML_GFX906_OP_PROF") != nullptr) {
+        atexit(ggml_cuda_op_prof_dump);
+    }
+    return true;
+}();
+
 static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cuda_ctx, ggml_cgraph * cgraph, const bool use_cuda_graph, const bool cuda_graph_update_required, const void * graph_key) {
     bool graph_evaluated_or_captured = false;
 
@@ -4820,7 +4880,22 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                     continue;
                 }
 
+                cudaEvent_t prof_ev0 = nullptr, prof_ev1 = nullptr;
+                const bool prof_on = ggml_cuda_op_prof_enabled() && !use_cuda_graph && !cuda_graph_update_required;
+                if (prof_on) {
+                    CUDA_CHECK(cudaEventCreateWithFlags(&prof_ev0, 0 /* prof: timing enabled */));
+                    CUDA_CHECK(cudaEventCreateWithFlags(&prof_ev1, 0 /* prof: timing enabled */));
+                    CUDA_CHECK(cudaEventRecord(prof_ev0, cuda_ctx->stream()));
+                }
+
                 int nodes_to_skip = ggml_cuda_try_fuse(cuda_ctx, cgraph, i);
+                if (prof_on && nodes_to_skip != 0) {
+                    CUDA_CHECK(cudaEventRecord(prof_ev1, cuda_ctx->stream()));
+                    ggml_cuda_op_prof_pending.push_back({prof_ev0, prof_ev1,
+                        std::string("FUSED:") + ggml_op_name(node->op) + ":" + node->name +
+                        " ne=" + std::to_string(node->ne[0]) + "x" + std::to_string(node->ne[1]) +
+                        "x" + std::to_string(node->ne[2]) + "x" + std::to_string(node->ne[3])});
+                }
 
                 if (nodes_to_skip != 0) {
 #ifdef GGML_CUDA_DEBUG
@@ -4854,6 +4929,13 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                     GGML_LOG_ERROR("%s: op not supported %s (%s)\n", __func__, node->name, ggml_op_name(node->op));
                 }
                 GGML_ASSERT(ok);
+                if (prof_on) {
+                    CUDA_CHECK(cudaEventRecord(prof_ev1, cuda_ctx->stream()));
+                    ggml_cuda_op_prof_pending.push_back({prof_ev0, prof_ev1,
+                        std::string(ggml_op_name(node->op)) + ":" + node->name +
+                        " ne=" + std::to_string(node->ne[0]) + "x" + std::to_string(node->ne[1]) +
+                        "x" + std::to_string(node->ne[2]) + "x" + std::to_string(node->ne[3])});
+                }
 
                 if (!is_concurrent_event_active) {
                     try_launch_concurrent_event(node);
@@ -4969,6 +5051,10 @@ static enum ggml_status ggml_backend_cuda_graph_compute(ggml_backend_t backend, 
     }
 
     ggml_cuda_graph_evaluate_and_capture(cuda_ctx, cgraph, use_cuda_graph, cuda_graph_update_required, graph_key);
+
+    if (ggml_cuda_op_prof_enabled()) {
+        ggml_cuda_op_prof_flush(cuda_ctx->stream());
+    }
 
     return GGML_STATUS_SUCCESS;
 }
