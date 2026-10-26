@@ -856,7 +856,7 @@ static void ggml_compute_forward_mul_mat_id_tiled_one_expert(
     const size_t nbw1 = (src1->type == vec_dot_type) ? nb11 : ggml_row_size(vec_dot_type, ne10);
     const void * wdata = (src1->type == vec_dot_type) ? src1->data : params->wdata;
 
-    const char * src0_cur = (const char *) src0->data + cur_a * nb02;
+    const char * src0_cur = (const char *) ggml_numa_mirror_remap(src0->data) + cur_a * nb02;
 
     // this thread's workspace
     tiled_ws * ws = (tiled_ws *) (scratch + (size_t) ith * ggml_tiled_ws_size());
@@ -956,7 +956,7 @@ static void ggml_compute_forward_mul_mat_tiled_one_chunk(
         const int64_t i02 = i12 / r2;
         const int64_t i03 = i13 / r3;
 
-        const char * src0_row = (const char *) src0->data + i02 * src0->nb[2] + i03 * src0->nb[3];
+        const char * src0_row = (const char *) ggml_numa_mirror_remap(src0->data) + i02 * src0->nb[2] + i03 * src0->nb[3];
         char * dst_col = (char *) dst->data + i12 * nb2 + i13 * nb3;
 
         // rows[r] is the window's row r base block; the k-slab offset is applied in the unpack
