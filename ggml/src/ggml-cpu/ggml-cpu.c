@@ -850,7 +850,7 @@ bool ggml_is_numa(void) {
 // NUMA weight mirroring (--numa mirror)
 //
 // Keeps a full per-NUMA-node replica of large host weight buffers so that the CPU GEMM paths (mul_mat / mul_mat_id) read weights from node-local memory instead of interleaved/remote pages.
-// The primary copy stays as tensor->data on the home node (picked from GPU PCIe affinity, see ggml_numa_mirror_pick_home_node); other nodes get an mmap'd replica. Threads pick their copy via getcpu() at op entry.
+// The primary copy stays as tensor->data on the home node (picked from GPU PCIe affinity, see ggml_numa_mirror_pick_home_node); other nodes get an mmap'd replica. Threads pick their copy via getcpu() at op entry. When page placement cannot be probed (move_pages denied), home gets a bound anonymous replica too - file-cache pages cannot be relocated and kernel readahead scatters them ~50/50.
 // The scheduler sources expert-weight uploads from the replica local to the destination GPU (ggml_numa_mirror_remap_node).
 // Buffers are discovered lazily at graph_compute time (ggml_numa_mirror_scan_graph): no allocator hooks, so any loader path that populates weights before the first compute is covered. Replicas are dropped when the owning buffer is freed (ggml_sched_set_buffer_free_notify).
 //
@@ -927,29 +927,6 @@ static bool ggml_numa_mirror_bind_pages(void * addr, size_t size, int node, bool
     // MPOL_BIND = 2, MPOL_MF_MOVE = 2 (numaif.h not required at build time)
     long rv = syscall(__NR_mbind, first, last - first, 2l, &nodemask, sizeof(nodemask)*8, move ? 2ul : 0ul);
     return rv == 0;
-}
-
-// synchronously fault a range readable, under a temporary prefer-home memory policy on the
-// calling thread. File page-cache pages are placed by whoever faults them first - a VMA's
-// mbind does not steer them - so without this the parallel replica copy lands them ~50/50
-static void ggml_numa_mirror_populate(const void * addr, size_t size, int node) {
-    // MPOL_PREFERRED = 1 (numaif.h not required at build time); prefer, not bind, so a full home node degrades instead of failing
-    int prev_mode = -1;
-    unsigned long prev_mask[2] = {0, 0};
-    syscall(__NR_get_mempolicy, &prev_mode, prev_mask, sizeof(prev_mask)*8, NULL, 0);
-    unsigned long nodemask = 1ul << node;
-    syscall(__NR_set_mempolicy, 1l, &nodemask, sizeof(nodemask)*8);
-
-    enum { GGML_MADV_POPULATE_READ = 23 }; // linux 5.14+, possibly missing from old libc headers
-    if (madvise((void *) addr, size, GGML_MADV_POPULATE_READ) != 0) {
-        const size_t page = (size_t) sysconf(_SC_PAGESIZE);
-        const volatile char * p = (const volatile char *) addr;
-        for (size_t off = 0; off < size; off += page) {
-            (void) p[off]; // volatile read, cannot be elided
-        }
-    }
-
-    syscall(__NR_set_mempolicy, prev_mode >= 0 ? prev_mode : 0l, prev_mask, sizeof(prev_mask)*8);
 }
 
 // free memory including reclaimable page cache - bare MemFree refuses to replicate on a node that only holds file cache the kernel would evict on demand
@@ -1078,12 +1055,13 @@ void ggml_numa_mirror_buffer_freed(struct ggml_backend_buffer * buffer) {
         // tombstone before unmapping: size 0 makes the entry unmatchable for lock-free readers, and no reader of a buffer being freed can still be in a GEMM on it
         void * replicas[GGML_NUMA_MAX_NODES];
         memcpy(replicas, mb->replica, sizeof(replicas));
+        void * primary = mb->base;
         const size_t sz = mb->size;
         mb->size  = 0;
         mb->base  = NULL;
         mb->owner = NULL;
         for (int nd = 0; nd < GGML_NUMA_MAX_NODES; ++nd) {
-            if (nd != g_numa_mirror.home_node && replicas[nd] != NULL) {
+            if (replicas[nd] != NULL && replicas[nd] != primary) {
                 munmap(replicas[nd], sz);
             }
             mb->replica[nd] = NULL;
@@ -1113,7 +1091,7 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
             // address range reused by a different buffer: drop stale replicas, rebuild
             GGML_NUMA_MIRROR_LOG_INFO("buffer address %p reused by a new buffer - rebuilding replicas\n", base);
             for (int nd = 0; nd < GGML_NUMA_MAX_NODES; ++nd) {
-                if (nd != g_numa_mirror.home_node && g_numa_mirror.bufs[i].replica[nd] != NULL) {
+                if (g_numa_mirror.bufs[i].replica[nd] != NULL && g_numa_mirror.bufs[i].replica[nd] != base) {
                     munmap(g_numa_mirror.bufs[i].replica[nd], g_numa_mirror.bufs[i].size);
                 }
                 g_numa_mirror.bufs[i].replica[nd] = NULL;
@@ -1142,14 +1120,14 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
 
     int64_t t1 = ggml_time_us();
     const double local_before = ggml_numa_mirror_local_fraction(base, size, home);
+    // when placement cannot be verified, give the home node a bound anonymous copy too - file
+    // page-cache pages cannot be relocated or reliably steered once cached elsewhere
+    const bool home_needs_copy = local_before < 0.0;
     if (local_before < 0.0) {
         // move_pages query failed - placement is unknown and cannot be reported, but mbind is a different
         // syscall and can still work: MPOL_BIND steers future faults home and MPOL_MF_MOVE migrates the
         // pages that are exclusive to this process (the common case for freshly loaded weights)
         ggml_numa_mirror_bind_pages(base, size, home, true);
-        // pages already cached on another node cannot be moved here, so fault in what is still missing
-        // ourselves - otherwise the parallel replica copy below first-touches them ~50/50
-        ggml_numa_mirror_populate(base, size, home);
         GGML_NUMA_MIRROR_LOG_WARN(
             "cannot probe the primary buffer's page placement (move_pages failed) - "
             "if the model is not already on node %d, launch with `numactl --membind=%d`\n", home, home);
@@ -1179,12 +1157,14 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
 
     int n_replicas = 0;
     for (int node = 0; node < g_numa_mirror.n_nodes && node < GGML_NUMA_MAX_NODES; ++node) {
-        if (node == home) {
+        if (node == home && !home_needs_copy) {
             continue;
         }
         void * rep = ggml_numa_mirror_alloc_replica(size, node);
         if (rep == NULL) {
-            GGML_NUMA_MIRROR_LOG_WARN("node %d has no replica - its threads read node %d remotely\n", node, home);
+            if (node != home) {
+                GGML_NUMA_MIRROR_LOG_WARN("node %d has no replica - its threads read node %d remotely\n", node, home);
+            } // else: no memory for a home copy - replica[home] stays the primary
             continue;
         }
         ggml_numa_mirror_copy(rep, base, size);
