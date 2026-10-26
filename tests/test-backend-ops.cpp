@@ -12563,6 +12563,27 @@ static std::vector<std::unique_ptr<test_case>> make_test_cases_perf() {
         test_cases.emplace_back(new test_leaky_relu(GGML_TYPE_F32, { 17408, n_tokens, 1, 1 }, 0.1f));
     }
 
+    // gfx906 decode/prefill matvec at Qwen27B (Q6_K, k=5120) and Qwen35B-MoE (Q4_K, k=2048) shapes
+    for (int64_t m : {1024, 5120, 6144, 10240, 12288, 17408}) {
+        for (int64_t n : {1, 8, 512}) {
+            test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q6_K, GGML_TYPE_F32, m, n, 5120, {1, 1}, {1, 1}));
+        }
+    }
+    for (int64_t m : {512, 1024, 2048, 4096}) {
+        for (int64_t n : {1, 8, 512}) {
+            test_cases.emplace_back(new test_mul_mat(GGML_TYPE_Q4_K, GGML_TYPE_F32, m, n, 2048, {1, 1}, {1, 1}));
+        }
+    }
+    for (ggml_type t : {GGML_TYPE_F16, GGML_TYPE_Q8_0, GGML_TYPE_Q4_0}) {
+        for (int64_t m : {5120, 17408}) {
+            test_cases.emplace_back(new test_mul_mat(t, GGML_TYPE_F32, m, 1, 5120, {1, 1}, {1, 1}));
+        }
+    }
+    // MoE expert shapes: 256 experts, top 8, k=2048, m=512
+    for (int64_t n : {1, 8, 512}) {
+        test_cases.emplace_back(new test_mul_mat_id(GGML_TYPE_Q4_K, GGML_TYPE_F32, 256, 8, false, 512, n, 2048));
+    }
+
     // Conv2d: K=CRS=NPQ=4096 matmul performance
     uint32_t                        iwh_idx  = 0;
     uint32_t                        kwh_idx  = 1;
