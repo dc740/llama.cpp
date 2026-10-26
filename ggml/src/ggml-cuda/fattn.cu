@@ -754,6 +754,17 @@ size_t ggml_cuda_flash_attn_ext_get_alloc_size(int device, const ggml_tensor * d
 
     switch (kernel) {
         case BEST_FATTN_KERNEL_TILE:
+            need_f16_K = true;
+            need_f16_V = true;
+#ifdef GGML_USE_HIP
+            {
+                // gfx906 tile kernels dequantize q8_0 K/V in the tile loader when eligible:
+                const int cc = ggml_cuda_info().devices[device].cc;
+                need_f16_K = !ggml_cuda_fattn_tile_q8_0_ok(cc, K);
+                need_f16_V = !ggml_cuda_fattn_tile_q8_0_ok(cc, V);
+            }
+#endif // GGML_USE_HIP
+            break;
         case BEST_FATTN_KERNEL_MMA_F16:
             need_f16_K = true;
             need_f16_V = true;
