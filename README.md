@@ -18,7 +18,7 @@
 | `gfx906-vecdot-attempt` | docs only: vec_dot instruction-reduction attempt (negative result, reverted) |
 | `fix-iq4nl-vdr` | vec_dot_iq4_nl_q8_1 uses VDR_IQ4_NL_Q8_1_MMVQ instead of the borrowed Q4_0 constant |
 | `fix-mmq-tiling-revert` | reverts upstream #29948 fused gate/up MMQ: restored the pre-fusion plain tiling that gfx906 needs (GLM pp +43% on revert A/B) |
-| `fix-mirror-bind` | NUMA mirror binds primary pages to home node even when the move_pages probe fails, so later faults land home instead of ~50/50 |
+| `fix-mirror-bind` | NUMA mirror: when the move_pages probe fails, home node gets a bound anonymous copy too - file-cache pages can't be relocated or steered, only an anon mbind copy guarantees home-local reads |
 
 ## measured (`dev-master`)
 
