@@ -929,6 +929,29 @@ static bool ggml_numa_mirror_bind_pages(void * addr, size_t size, int node, bool
     return rv == 0;
 }
 
+// synchronously fault a range readable, under a temporary prefer-home memory policy on the
+// calling thread. File page-cache pages are placed by whoever faults them first - a VMA's
+// mbind does not steer them - so without this the parallel replica copy lands them ~50/50
+static void ggml_numa_mirror_populate(const void * addr, size_t size, int node) {
+    // MPOL_PREFERRED = 1 (numaif.h not required at build time); prefer, not bind, so a full home node degrades instead of failing
+    int prev_mode = -1;
+    unsigned long prev_mask[2] = {0, 0};
+    syscall(__NR_get_mempolicy, &prev_mode, prev_mask, sizeof(prev_mask)*8, NULL, 0);
+    unsigned long nodemask = 1ul << node;
+    syscall(__NR_set_mempolicy, 1l, &nodemask, sizeof(nodemask)*8);
+
+    enum { GGML_MADV_POPULATE_READ = 23 }; // linux 5.14+, possibly missing from old libc headers
+    if (madvise((void *) addr, size, GGML_MADV_POPULATE_READ) != 0) {
+        const size_t page = (size_t) sysconf(_SC_PAGESIZE);
+        const volatile char * p = (const volatile char *) addr;
+        for (size_t off = 0; off < size; off += page) {
+            (void) p[off]; // volatile read, cannot be elided
+        }
+    }
+
+    syscall(__NR_set_mempolicy, prev_mode >= 0 ? prev_mode : 0l, prev_mask, sizeof(prev_mask)*8);
+}
+
 // free memory including reclaimable page cache - bare MemFree refuses to replicate on a node that only holds file cache the kernel would evict on demand
 static long long ggml_numa_mirror_node_free_bytes(int node) {
     char path[256];
@@ -1124,6 +1147,9 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
         // syscall and can still work: MPOL_BIND steers future faults home and MPOL_MF_MOVE migrates the
         // pages that are exclusive to this process (the common case for freshly loaded weights)
         ggml_numa_mirror_bind_pages(base, size, home, true);
+        // pages already cached on another node cannot be moved here, so fault in what is still missing
+        // ourselves - otherwise the parallel replica copy below first-touches them ~50/50
+        ggml_numa_mirror_populate(base, size, home);
         GGML_NUMA_MIRROR_LOG_WARN(
             "cannot probe the primary buffer's page placement (move_pages failed) - "
             "if the model is not already on node %d, launch with `numactl --membind=%d`\n", home, home);
