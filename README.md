@@ -21,6 +21,7 @@
 | `fix-mirror-bind` | NUMA mirror: when the move_pages probe fails, home node gets a bound anonymous copy too - file-cache pages can't be relocated or steered, only an anon mbind copy guarantees home-local reads |
 | `gfx906-mirror-replica-pin` | page-lock NUMA-mirror replica pages through the GPU backend's host-register hook (GGML_CUDA_REGISTER_HOST now covers replicas, the exps=CPU upload sources) |
 | `fix-mirror-bind-cap` | NUMA mirror: cap the probe-fail home anon copies at 40% of the home node's free+reclaimable memory - unbounded they double per-node weight RAM and evict the model's own pages |
+| `fix-mirror-primary-home` | NUMA mirror: file-mapped weight buffers always get a bound anonymous home replica - the resident-pages probe lies for sparse file buffers and their remaining pages fault ~50/50 across nodes, unrelocatable once cached |
 
 ## measured (`dev-master`)
 
