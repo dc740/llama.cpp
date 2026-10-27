@@ -22,6 +22,7 @@
 | `gfx906-mirror-replica-pin` | page-lock NUMA-mirror replica pages through the GPU backend's host-register hook (GGML_CUDA_REGISTER_HOST now covers replicas, the exps=CPU upload sources) |
 | `fix-mirror-bind-cap` | NUMA mirror: cap the probe-fail home anon copies at 40% of the home node's free+reclaimable memory - unbounded they double per-node weight RAM and evict the model's own pages |
 | `fix-mirror-primary-home` | NUMA mirror: file-mapped weight buffers always get a bound anonymous home replica - the resident-pages probe lies for sparse file buffers and their remaining pages fault ~50/50 across nodes, unrelocatable once cached |
+| `fix-mirror-cap` | NUMA mirror: file-backed primaries exempt from the 40% home-anon cap - the free+reclaimable denominator shrinks as copies land, so any ratio caps coverage near 40%; the anon copy only displaces its own dead file cache. Coverage ~46% -> ~100% (0 skips, GLM 225/K3 276 bufs); tg unchanged |
 
 ## measured (`dev-master`)
 
@@ -33,6 +34,8 @@ Aggregate throughput serving **8 simultaneous streams** (`llama-batched-bench -n
 | Kimi-K3 UD-TQ1_0 (2.8T, ~474GB) | `-ngl 99 -dev ROCm0,ROCm1,ROCm2 -ot exps=CPU` | **5.47** | **4.17** |
 
 Re-measured 2026-10-27 after `fix-numa-mirror-tiled`, `fix-mmq-tiling-revert`, `fix-mirror-bind{,-cap}` (PP512 row, `-c 16384` GLM / `-c 8192` K3). Prior rows: GLM 13.74/9.90, K3 5.59/4.19.
+
+`fix-mirror-cap` A/B (home-anon coverage ~46% -> ~100%, same run config): GLM pp512 13.47/10.17 (2 runs, noisy) tg512 9.92/6.87 vs 11.35/10.14 warm baseline - tg inside the historical 7.38-10.14 band; K3 5.49/4.18 vs 5.52/4.16; Qwen3.6-35B sanity 834/83 unchanged. Full coverage is not the tg bottleneck - residual remote-read cost is elsewhere (icache, barrier, KDA path).
 
 Single-GPU `llama-bench` (-ngl 999 -fa on -ctk/-ctv q8_0 -t8 -p512 -n64 -d8192):
 
