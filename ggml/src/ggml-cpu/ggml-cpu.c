@@ -850,7 +850,7 @@ bool ggml_is_numa(void) {
 // NUMA weight mirroring (--numa mirror)
 //
 // Keeps a full per-NUMA-node replica of large host weight buffers so that the CPU GEMM paths (mul_mat / mul_mat_id) read weights from node-local memory instead of interleaved/remote pages.
-// The primary copy stays as tensor->data on the home node (picked from GPU PCIe affinity, see ggml_numa_mirror_pick_home_node); other nodes get an mmap'd replica. Threads pick their copy via getcpu() at op entry. When page placement cannot be probed (move_pages denied), home gets a bound anonymous replica too - file-cache pages cannot be relocated and kernel readahead scatters them ~50/50. Home copies are capped at ~40% of the node's free+reclaimable memory in total: beyond that they evict the model's own pages and cost more than the remote reads they avoid.
+// The primary copy stays as tensor->data on the home node (picked from GPU PCIe affinity, see ggml_numa_mirror_pick_home_node); other nodes get an mmap'd replica. Threads pick their copy via getcpu() at op entry. Home gets a bound anonymous replica too when page placement cannot be probed (move_pages denied) or the primary is file-backed - file-cache pages cannot be relocated and fault-in scatters them ~50/50 regardless of the VMA policy. Home copies are capped at ~40% of the node's free+reclaimable memory in total: beyond that they evict the model's own pages and cost more than the remote reads they avoid.
 // The scheduler sources expert-weight uploads from the replica local to the destination GPU (ggml_numa_mirror_remap_node).
 // Buffers are discovered lazily at graph_compute time (ggml_numa_mirror_scan_graph): no allocator hooks, so any loader path that populates weights before the first compute is covered. Replicas are dropped when the owning buffer is freed (ggml_sched_set_buffer_free_notify).
 //
@@ -995,6 +995,42 @@ static double ggml_numa_mirror_local_fraction(void * addr, size_t size, int node
     return valid == 0 ? -1.0 : (double) local / (double) valid;
 }
 
+// the resident-pages probe cannot be trusted for file-backed ranges: a sparse file buffer reads
+// "100%" from a handful of cached pages, and the rest faults in on whatever node the copy threads
+// run on - file-cache allocation follows the faulting thread, not the VMA policy, so mbind cannot
+// prevent or repair the ~50/50 split. detected via the VMA pathname in /proc/self/maps: real files
+// carry a path, anon and special mappings are empty or [bracketed]
+static bool ggml_numa_mirror_is_file_backed(void * addr, size_t size) {
+    FILE * f = fopen("/proc/self/maps", "r");
+    if (f == NULL) {
+        return false;
+    }
+    const uintptr_t end = (uintptr_t) addr + size;
+    char line[4096];
+    bool file_backed = false;
+    while (fgets(line, sizeof(line), f)) {
+        uintptr_t lo, hi;
+        unsigned long ino;
+        int off = 0;
+        if (sscanf(line, "%lx-%lx %*4s %*x %*x:%*x %lu %n", &lo, &hi, &ino, &off) < 3) {
+            continue;
+        }
+        if (hi <= (uintptr_t) addr || lo >= end) {
+            continue;
+        }
+        const char * path = line + off;
+        while (*path == ' ' || *path == '\t') {
+            ++path;
+        }
+        if (*path != '\0' && *path != '\n' && *path != '[') {
+            file_backed = true;
+            break;
+        }
+    }
+    fclose(f);
+    return file_backed;
+}
+
 bool ggml_numa_mirror_enabled(void) {
     if (g_numa_mirror.enabled < 0) {
         // ggml_numa_init() runs at backend init, before any weight buffer registers here, so the strategy is settled by the time this gate is first evaluated
@@ -1136,10 +1172,16 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
 
     int64_t t1 = ggml_time_us();
     const double local_before = ggml_numa_mirror_local_fraction(base, size, home);
-    // when placement cannot be verified, give the home node a bound anonymous copy too - file
-    // page-cache pages cannot be relocated or reliably steered once cached elsewhere
-    const bool home_needs_copy = local_before < 0.0;
-    if (local_before < 0.0) {
+    const bool   file_backed  = ggml_numa_mirror_is_file_backed(base, size);
+    // when placement cannot be verified - or the range is file-backed, where the resident-pages
+    // probe lies and fault-in placement cannot be steered - give the home node a bound anonymous
+    // copy too; home threads then read unreclaimable anon pages instead of drifting file cache
+    const bool home_needs_copy = local_before < 0.0 || file_backed;
+    if (file_backed) {
+        // mbind cannot move cached file pages, but the policy still steers any re-faults after eviction
+        ggml_numa_mirror_bind_pages(base, size, home, false);
+        GGML_NUMA_MIRROR_LOG_INFO("primary %.1f GiB is file-backed - building a bound anonymous home copy\n", gib);
+    } else if (local_before < 0.0) {
         // move_pages query failed - placement is unknown and cannot be reported, but mbind is a different
         // syscall and can still work: MPOL_BIND steers future faults home and MPOL_MF_MOVE migrates the
         // pages that are exclusive to this process (the common case for freshly loaded weights)
@@ -1166,7 +1208,7 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
     }
     const double local_after = ggml_numa_mirror_local_fraction(base, size, home);
     int64_t t2 = ggml_time_us();
-    if (local_before >= 0.0 && local_after >= 0.0) {
+    if (!file_backed && local_before >= 0.0 && local_after >= 0.0) {
         GGML_NUMA_MIRROR_LOG_INFO("primary %p %.1f GiB: %.0f%% -> %.0f%% on node %d (%.1f s)\n",
                 base, gib, local_before * 100.0, local_after * 100.0, home, (t2 - t1) / 1e6);
     }
