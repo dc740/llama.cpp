@@ -20,6 +20,7 @@
 | `fix-mmq-tiling-revert` | reverts upstream #29948 fused gate/up MMQ: restored the pre-fusion plain tiling that gfx906 needs (GLM pp +43% on revert A/B) |
 | `fix-mirror-bind` | NUMA mirror: when the move_pages probe fails, home node gets a bound anonymous copy too - file-cache pages can't be relocated or steered, only an anon mbind copy guarantees home-local reads |
 | `gfx906-mirror-replica-pin` | page-lock NUMA-mirror replica pages through the GPU backend's host-register hook (GGML_CUDA_REGISTER_HOST now covers replicas, the exps=CPU upload sources) |
+| `fix-mirror-bind-cap` | NUMA mirror: cap the probe-fail home anon copies at 40% of the home node's free+reclaimable memory - unbounded they double per-node weight RAM and evict the model's own pages |
 
 ## measured (`dev-master`)
 
@@ -31,6 +32,8 @@ Aggregate throughput serving **8 simultaneous streams** (`llama-batched-bench -n
 | Kimi-K3 UD-TQ1_0 (2.8T, ~474GB) | `-ngl 99 -dev ROCm0,ROCm1,ROCm2 -ot exps=CPU` | **5.59** | **4.19** |
 
 Per-stream = agg/8: GLM ~1.4 t/s, K3 ~0.5 t/s per user. Single-stream TG: GLM 4.04, K3 ~0.7. GLM scales further: npl16 agg 11.73, real chat API @16 streams 9.29 t/s.
+
+Re-measured after `fix-mirror-bind-cap` (2026-10-27, same flags): K3 PP512 row 5.47 pp / 4.17 tg, GLM PP512 row 14.63 pp / 10.70 tg. Do not run the batched -t28 mirror benches under `numactl --cpunodebind` - 28 threads oversubscribe one 18-core socket and tg drops ~30%.
 
 ## branch details
 
