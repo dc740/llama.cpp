@@ -850,7 +850,7 @@ bool ggml_is_numa(void) {
 // NUMA weight mirroring (--numa mirror)
 //
 // Keeps a full per-NUMA-node replica of large host weight buffers so that the CPU GEMM paths (mul_mat / mul_mat_id) read weights from node-local memory instead of interleaved/remote pages.
-// The primary copy stays as tensor->data on the home node (picked from GPU PCIe affinity, see ggml_numa_mirror_pick_home_node); other nodes get an mmap'd replica. Threads pick their copy via getcpu() at op entry. Home gets a bound anonymous replica too when page placement cannot be probed (move_pages denied) or the primary is file-backed - file-cache pages cannot be relocated and fault-in scatters them ~50/50 regardless of the VMA policy. Home copies are capped at ~40% of the node's free+reclaimable memory in total: beyond that they evict the model's own pages and cost more than the remote reads they avoid.
+// The primary copy stays as tensor->data on the home node (picked from GPU PCIe affinity, see ggml_numa_mirror_pick_home_node); other nodes get an mmap'd replica. Threads pick their copy via getcpu() at op entry. Home gets a bound anonymous replica too when page placement cannot be probed (move_pages denied) or the primary is file-backed - file-cache pages cannot be relocated and fault-in scatters them ~50/50 regardless of the VMA policy. Home copies for unprobeable primaries are capped at ~40% of the node's free+reclaimable memory in total: beyond that they evict the model's own pages and cost more than the remote reads they avoid. File-backed primaries are exempt - each page the copy claims displaces one of the primary's own dead cache pages - but every replica still has to fit in free+reclaimable memory when it is allocated.
 // The scheduler sources expert-weight uploads from the replica local to the destination GPU (ggml_numa_mirror_remap_node).
 // Buffers are discovered lazily at graph_compute time (ggml_numa_mirror_scan_graph): no allocator hooks, so any loader path that populates weights before the first compute is covered. Replicas are dropped when the owning buffer is freed (ggml_sched_set_buffer_free_notify).
 //
@@ -1218,12 +1218,14 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
         if (node == home && !home_needs_copy) {
             continue;
         }
-        if (node == home) {
+        if (node == home && !file_backed) {
             // the home copy doubles the node's weight footprint and its anon pages are
             // unreclaimable, while the "free" count includes file cache the kernel evicts
             // to make room - uncapped, it evicts the model's own pages and costs more
             // than the remote reads it avoids. cap the cumulative home-anon total at
-            // 40% of the node's free+reclaimable memory.
+            // 40% of the node's free+reclaimable memory. file-backed primaries are exempt:
+            // the anon copy replaces the primary's own dead cache pages, and the free count
+            // shrinks as copies land, so any percentage cap pins coverage near 40%.
             const long long free_bytes = ggml_numa_mirror_node_free_bytes(home);
             size_t home_anon = 0;
             for (int i = 0; i < n; ++i) {
