@@ -545,6 +545,8 @@ void         ggml_numa_mirror_buffer_freed(struct ggml_backend_buffer * buffer);
 const void * ggml_numa_mirror_remap(const void * p);
 const void * ggml_numa_mirror_remap_node(const void * p, int node);
 void         ggml_numa_mirror_scan_graph(const struct ggml_cgraph * cgraph);
+// page-lock hook for replica pages, wired to a GPU backend's host-buffer register by the caller
+void         ggml_numa_mirror_set_pin_hook(bool (*pin)(void *, size_t), void (*unpin)(void *));
 
 #ifdef __cplusplus
 }

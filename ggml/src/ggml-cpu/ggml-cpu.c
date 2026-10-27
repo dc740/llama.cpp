@@ -882,6 +882,16 @@ static struct {
 // serializes register/unregister (two llama contexts in one process may compute concurrently); the remap hot path stays lock-free
 static pthread_mutex_t g_numa_mirror_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+// optional page-lock hook for the replicas: wired by the caller to a GPU backend's host-buffer
+// register so uploads source pinned pages (full DMA rate) instead of pageable memory
+static bool (*g_numa_mirror_pin_fn)(void *, size_t)     = NULL;
+static void (*g_numa_mirror_unpin_fn)(void *)           = NULL;
+
+void ggml_numa_mirror_set_pin_hook(bool (*pin)(void *, size_t), void (*unpin)(void *)) {
+    g_numa_mirror_pin_fn   = pin;
+    g_numa_mirror_unpin_fn = unpin;
+}
+
 #define GGML_NUMA_MIRROR_LOG_INFO(...) GGML_LOG_INFO("NUMA mirror: " __VA_ARGS__)
 #define GGML_NUMA_MIRROR_LOG_WARN(...) GGML_LOG_WARN("NUMA mirror: " __VA_ARGS__)
 
@@ -1062,6 +1072,9 @@ void ggml_numa_mirror_buffer_freed(struct ggml_backend_buffer * buffer) {
         mb->owner = NULL;
         for (int nd = 0; nd < GGML_NUMA_MAX_NODES; ++nd) {
             if (replicas[nd] != NULL && replicas[nd] != primary) {
+                if (g_numa_mirror_unpin_fn != NULL) {
+                    g_numa_mirror_unpin_fn(replicas[nd]);
+                }
                 munmap(replicas[nd], sz);
             }
             mb->replica[nd] = NULL;
@@ -1092,6 +1105,9 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
             GGML_NUMA_MIRROR_LOG_INFO("buffer address %p reused by a new buffer - rebuilding replicas\n", base);
             for (int nd = 0; nd < GGML_NUMA_MAX_NODES; ++nd) {
                 if (g_numa_mirror.bufs[i].replica[nd] != NULL && g_numa_mirror.bufs[i].replica[nd] != base) {
+                    if (g_numa_mirror_unpin_fn != NULL) {
+                        g_numa_mirror_unpin_fn(g_numa_mirror.bufs[i].replica[nd]);
+                    }
                     munmap(g_numa_mirror.bufs[i].replica[nd], g_numa_mirror.bufs[i].size);
                 }
                 g_numa_mirror.bufs[i].replica[nd] = NULL;
@@ -1155,7 +1171,7 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
                 base, gib, local_before * 100.0, local_after * 100.0, home, (t2 - t1) / 1e6);
     }
 
-    int n_replicas = 0;
+    int n_replicas = 0, n_pinned = 0;
     for (int node = 0; node < g_numa_mirror.n_nodes && node < GGML_NUMA_MAX_NODES; ++node) {
         if (node == home && !home_needs_copy) {
             continue;
@@ -1168,11 +1184,16 @@ void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base,
             continue;
         }
         ggml_numa_mirror_copy(rep, base, size);
+        // page-lock after the copy: pages are faulted and home-placed by then; best-effort,
+        // a failed pin still leaves a working pageable replica
+        if (g_numa_mirror_pin_fn != NULL && g_numa_mirror_pin_fn(rep, size)) {
+            ++n_pinned;
+        }
         mb->replica[node] = rep;
         ++n_replicas;
     }
     int64_t t3 = ggml_time_us();
-    GGML_NUMA_MIRROR_LOG_INFO("%d replica(s) of %.1f GiB built in %.1f s\n", n_replicas, gib, (t3 - t2) / 1e6);
+    GGML_NUMA_MIRROR_LOG_INFO("%d replica(s) of %.1f GiB built in %.1f s (%d pinned)\n", n_replicas, gib, (t3 - t2) / 1e6, n_pinned);
 
     if (n_replicas > 0) {
         g_numa_mirror.bytes_mirrored += size;
@@ -1265,6 +1286,11 @@ void ggml_numa_mirror_scan_graph(const struct ggml_cgraph * cgraph) {
 
 bool ggml_numa_mirror_enabled(void) {
     return false;
+}
+
+void ggml_numa_mirror_set_pin_hook(bool (*pin)(void *, size_t), void (*unpin)(void *)) {
+    GGML_UNUSED(pin);
+    GGML_UNUSED(unpin);
 }
 
 void ggml_numa_mirror_register(struct ggml_backend_buffer * buffer, void * base, size_t size) {

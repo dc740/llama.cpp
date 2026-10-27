@@ -691,6 +691,9 @@ static void * ggml_backend_cpu_get_proc_address(ggml_backend_reg_t reg, const ch
     if (strcmp(name, "ggml_backend_cpu_set_use_ref") == 0) {
         return (void *)ggml_backend_cpu_set_use_ref;
     }
+    if (strcmp(name, "ggml_backend_cpu_set_mirror_pin_hook") == 0) {
+        return (void *)ggml_numa_mirror_set_pin_hook;
+    }
 
     // threadpool - TODO:  move to ggml-base
     if (strcmp(name, "ggml_threadpool_new") == 0) {
