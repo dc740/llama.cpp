@@ -1259,7 +1259,24 @@ static buft_list_t make_gpu_buft_list(ggml_backend_dev_t dev, llama_split_mode s
 
 struct llama_model::impl {
     impl() = default;
-    ~impl() = default;
+    ~impl() {
+        for (const auto & [base, size] : registered_host_buffers) {
+            for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+                ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+                const auto dev_type = ggml_backend_dev_type(dev);
+                if (dev_type != GGML_BACKEND_DEVICE_TYPE_GPU && dev_type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
+                    continue;
+                }
+                auto * unregister_fn = (void (*)(void *)) ggml_backend_reg_get_proc_address(
+                    ggml_backend_dev_backend_reg(dev), "ggml_backend_unregister_host_buffer");
+                if (unregister_fn != nullptr) {
+                    unregister_fn(base);
+                    break;
+                }
+            }
+            GGML_UNUSED(size);
+        }
+    }
 
     uint64_t n_elements = 0;
 
@@ -1278,6 +1295,9 @@ struct llama_model::impl {
 
     // contexts where the model tensors metadata is stored as well as the corresponding buffers:
     std::vector<std::pair<ggml_context_ptr, std::vector<ggml_backend_buffer_ptr>>> ctxs_bufs;
+
+    // host weight buffers registered with a GPU backend at load (freed here, before the buffers)
+    std::vector<std::pair<void *, size_t>> registered_host_buffers;
 
     buft_list_t cpu_buft_list;
     std::map<ggml_backend_dev_t, buft_list_t> gpu_buft_list;
@@ -2061,6 +2081,60 @@ bool llama_model_base::load_tensors(llama_model_loader & ml) {
     }
 
     load_tensors_hadamard();
+
+    // register host weight buffers with the first GPU backend that supports it: async uploads
+    // (selective expert copies, MoE cache fills) then run at full DMA speed instead of bouncing
+    // through pageable staging. a no-op unless the backend's hook is enabled (GGML_CUDA_REGISTER_HOST)
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        const auto dev_type = ggml_backend_dev_type(dev);
+        if (dev_type != GGML_BACKEND_DEVICE_TYPE_GPU && dev_type != GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            continue;
+        }
+        auto * register_fn = (bool (*)(void *, size_t)) ggml_backend_reg_get_proc_address(
+            ggml_backend_dev_backend_reg(dev), "ggml_backend_register_host_buffer");
+        if (register_fn == nullptr) {
+            continue;
+        }
+        size_t registered_bytes = 0;
+        for (const auto & [ctx, bufs] : pimpl->ctxs_bufs) {
+            for (const auto & buf : bufs) {
+                if (!ggml_backend_buffer_is_host(buf.get()) ||
+                    ggml_backend_buffer_get_usage(buf.get()) != GGML_BACKEND_BUFFER_USAGE_WEIGHTS) {
+                    continue;
+                }
+                void * base = ggml_backend_buffer_get_base(buf.get());
+                const size_t size = ggml_backend_buffer_get_size(buf.get());
+                if (register_fn(base, size)) {
+                    pimpl->registered_host_buffers.emplace_back(base, size);
+                    registered_bytes += size;
+                }
+            }
+        }
+        if (!pimpl->registered_host_buffers.empty()) {
+            LLAMA_LOG_INFO("%s: registered %zu host weight buffers with %s (%.1f GiB)\n", __func__,
+                pimpl->registered_host_buffers.size(), ggml_backend_dev_name(dev), registered_bytes/1024.0/1024.0/1024.0);
+        }
+
+        // hand the same register/unregister pair to the CPU NUMA mirror: exps=CPU uploads read
+        // the per-node replicas, not the primary buffer, so the replicas need pinning too
+        auto * unregister_fn = (void (*)(void *)) ggml_backend_reg_get_proc_address(
+            ggml_backend_dev_backend_reg(dev), "ggml_backend_unregister_host_buffer");
+        for (size_t j = 0; j < ggml_backend_dev_count(); ++j) {
+            ggml_backend_dev_t cpu_dev = ggml_backend_dev_get(j);
+            if (ggml_backend_dev_type(cpu_dev) != GGML_BACKEND_DEVICE_TYPE_CPU) {
+                continue;
+            }
+            auto * set_pin_fn = (void (*)(bool (*)(void *, size_t), void (*)(void *))) ggml_backend_reg_get_proc_address(
+                ggml_backend_dev_backend_reg(cpu_dev), "ggml_backend_cpu_set_mirror_pin_hook");
+            if (set_pin_fn != nullptr) {
+                set_pin_fn(register_fn, unregister_fn);
+            }
+            break;
+        }
+
+        break; // the registration is portable - one call covers all devices
+    }
 
     return true;
 }
