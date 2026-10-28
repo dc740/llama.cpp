@@ -2844,10 +2844,15 @@ static void ggml_compute_forward(struct ggml_compute_params * params, struct ggm
 
 // Android's libc implementation "bionic" does not support setting affinity
 #if defined(__gnu_linux__)
+// a thread NUMA placement depends only on its index, so it only needs applying
+// once; clear_numa_thread_affinity() resets this for the main thread
+static __thread bool numa_affinity_done = false;
+
 static void set_numa_thread_affinity(int thread_n) {
-    if (!ggml_is_numa()) {
+    if (!ggml_is_numa() || numa_affinity_done) {
         return;
     }
+    numa_affinity_done = true;
 
     int node_num;
     int rv;
@@ -2915,6 +2920,8 @@ static void clear_numa_thread_affinity(void) {
     }
 
     CPU_FREE(cpus);
+
+    numa_affinity_done = false;
 }
 #else
 // TODO: Windows etc.
