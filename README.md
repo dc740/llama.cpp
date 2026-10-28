@@ -37,12 +37,14 @@ Re-measured 2026-10-27 after `fix-numa-mirror-tiled`, `fix-mmq-tiling-revert`, `
 
 `fix-mirror-cap` A/B (home-anon coverage ~46% -> ~100%, same run config): GLM pp512 13.47/10.17 (2 runs, noisy) tg512 9.92/6.87 vs 11.35/10.14 warm baseline - tg inside the historical 7.38-10.14 band; K3 5.49/4.18 vs 5.52/4.16; Qwen3.6-35B sanity 834/83 unchanged. Full coverage is not the tg bottleneck - residual remote-read cost is elsewhere (icache, barrier, KDA path).
 
-Single-GPU `llama-bench` (-ngl 999 -fa on -ctk/-ctv q8_0 -t8 -p512 -n64 -d8192):
+GLM-5.3 MTP speculative decode (optional, single-stream): `--spec-type draft-mtp --spec-draft-n-max 3` decodes ~6.54 tg t/s vs ~4.3 without (+36-52%, ~70% acceptance). Not used in the rows above.
+
+Single-GPU `llama-bench` (-ngl 999 -fa on -ctk/-ctv q8_0 -t8 -p512 -n64 -d8192). Stock upstream on the same host/config: 27B 153/22, 35B-A3B 437/71:
 
 | model | pp t/s | tg t/s |
 |---|---|---|
 | Qwen3.8-27B UD-Q6_K | 154.79 | 23.33 |
-| Qwen3.6-35B-A3B UD-Q4_K_XL | 831.27 | 83.24 |
+| Qwen3.6-35B-A3B UD-Q4_K_XL | 831.27 | 84.7 |
 
 Per-stream = agg/8: GLM ~1.4 t/s, K3 ~0.5 t/s per user. GLM scales further: npl16 agg 11.73, real chat API @16 streams 9.29 t/s. Do not run the batched -t28 mirror benches under `numactl --cpunodebind` - 28 threads oversubscribe one 18-core socket and tg drops ~30%.
 
