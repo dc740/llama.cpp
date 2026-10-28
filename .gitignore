@@ -152,5 +152,6 @@ a.out.*
 # AGENTS
 
 AGENTS.local.md
-.pi/SYSTEM.md
+.pi/
+.aider*
 docs/session-state.md
