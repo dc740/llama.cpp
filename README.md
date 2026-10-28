@@ -92,4 +92,4 @@ For `llama-cli` or `llama-bench`, use `--device ROCm1` with the same visibility 
 - Dell PowerEdge R740, 2x Intel Xeon Gold 6254 (Cascade Lake) @ 3.10GHz - 18 cores/socket, HT off, 36 cores total, 2 NUMA nodes
 - ~1.5TB DDR4-2666 ECC across both sockets (dup channels, one set per node) - this is why mirroring weights per-node pays off: both sockets' memory bandwidth get used instead of crossing the UPI link
 - 3x AMD Instinct MI50-class, gfx906:sramecc+xnack-, 32GB HBM2 each (~98GB total VRAM), ROCm; also exposed as RADV VEGA20 to Vulkan
-- Model storage on NFS (`<NFS>`) - 400+GB model loads take ~30min; not part of steady-state serving cost
+- Model storage on NFS - 400+GB model loads take ~30min; not part of steady-state serving cost
