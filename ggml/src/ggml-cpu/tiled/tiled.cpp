@@ -534,6 +534,99 @@ static void tiled_unpack_src0(const block_iq1_m * rows, int64_t row_stride, int 
     }
 }
 
+// iq1_xs (unsloth): ternary grid like iq1_s; 10-bit index = qs byte | 2 high bits from qh,
+// nibble per 32-subblock in sc: 3-bit scale, bit3 delta sign. Same code/delta folding as iq1_s.
+static void tiled_unpack_src0(const block_iq1_xs * rows, int64_t row_stride, int n_rows, tiled_tile_src0 * tile, int num_k) {
+    GGML_ASSERT(n_rows <= TILED_TILE_ROWS);
+    constexpr int NB = 8; // 32-wide subblocks
+
+    const int qk_stride = num_k * TILED_TILE_K;
+    const int nb_stride = NB * num_k;
+    for (int slab = 0; slab < num_k; slab++) {
+        for (int r = 0; r < n_rows; r++) {
+            const int d_off = slab * TILED_MICRO + r;
+            const int q_off = r * qk_stride + slab * TILED_TILE_K;
+            const int s_off = r * nb_stride + slab * NB;
+            const block_iq1_xs & x = rows[r * row_stride + slab];
+            tile->d[d_off] = ggml_fp16_to_fp32(x.d) * 0.125f;
+
+            const uint8_t * qs = x.qs;
+            for (int ib = 0; ib < QK_K / 32; ib++) {
+                const int nib = (x.sc[ib / 2] >> (4 * (ib & 1))) & 0xf;
+                tile->scales[s_off + ib] = (int32_t) (2 * (nib & 7) + 1);
+                const int8_t delta = (nib & 8) ? -1 : 1;
+                for (int l = 0; l < 4; l++) {
+                    const uint64_t entry = iq1_xs_grid[qs[l] | (((x.qh[ib] >> (2 * l)) & 3) << 8)];
+                    tiled_unpk_tern8((const uint8_t *) &entry, delta, &tile->q[q_off + 32 * ib + 8 * l]);
+                }
+                qs += 4;
+            }
+        }
+    }
+}
+
+// iq1_xxs (unsloth): ternary grid; 9-bit index = qs byte | 1 bit from qh low nibble,
+// scale (bits 4-6) and delta sign (bit 7) packed in the same qh byte per 32-subblock.
+static void tiled_unpack_src0(const block_iq1_xxs * rows, int64_t row_stride, int n_rows, tiled_tile_src0 * tile, int num_k) {
+    GGML_ASSERT(n_rows <= TILED_TILE_ROWS);
+    constexpr int NB = 8; // 32-wide subblocks
+
+    const int qk_stride = num_k * TILED_TILE_K;
+    const int nb_stride = NB * num_k;
+    for (int slab = 0; slab < num_k; slab++) {
+        for (int r = 0; r < n_rows; r++) {
+            const int d_off = slab * TILED_MICRO + r;
+            const int q_off = r * qk_stride + slab * TILED_TILE_K;
+            const int s_off = r * nb_stride + slab * NB;
+            const block_iq1_xxs & x = rows[r * row_stride + slab];
+            tile->d[d_off] = ggml_fp16_to_fp32(x.d) * 0.125f;
+
+            const uint8_t * qs = x.qs;
+            for (int ib = 0; ib < QK_K / 32; ib++) {
+                const uint8_t h = x.qh[ib];
+                tile->scales[s_off + ib] = (int32_t) (2 * ((h >> 4) & 7) + 1);
+                const int8_t delta = (h & 0x80) ? -1 : 1;
+                for (int l = 0; l < 4; l++) {
+                    const uint64_t entry = iq1_xxs_grid[qs[l] | (((h >> l) & 1) << 8)];
+                    tiled_unpk_tern8((const uint8_t *) &entry, delta, &tile->q[q_off + 32 * ib + 8 * l]);
+                }
+                qs += 4;
+            }
+        }
+    }
+}
+
+// iq1_xxxs (unsloth): ternary grid; plain 8-bit index in qs, scale/delta nibble per
+// 32-subblock in sc (same packing as iq1_xs).
+static void tiled_unpack_src0(const block_iq1_xxxs * rows, int64_t row_stride, int n_rows, tiled_tile_src0 * tile, int num_k) {
+    GGML_ASSERT(n_rows <= TILED_TILE_ROWS);
+    constexpr int NB = 8; // 32-wide subblocks
+
+    const int qk_stride = num_k * TILED_TILE_K;
+    const int nb_stride = NB * num_k;
+    for (int slab = 0; slab < num_k; slab++) {
+        for (int r = 0; r < n_rows; r++) {
+            const int d_off = slab * TILED_MICRO + r;
+            const int q_off = r * qk_stride + slab * TILED_TILE_K;
+            const int s_off = r * nb_stride + slab * NB;
+            const block_iq1_xxxs & x = rows[r * row_stride + slab];
+            tile->d[d_off] = ggml_fp16_to_fp32(x.d) * 0.125f;
+
+            const uint8_t * qs = x.qs;
+            for (int ib = 0; ib < QK_K / 32; ib++) {
+                const int nib = (x.sc[ib / 2] >> (4 * (ib & 1))) & 0xf;
+                tile->scales[s_off + ib] = (int32_t) (2 * (nib & 7) + 1);
+                const int8_t delta = (nib & 8) ? -1 : 1;
+                for (int l = 0; l < 4; l++) {
+                    const uint64_t entry = iq1_xxxs_grid[qs[l]];
+                    tiled_unpk_tern8((const uint8_t *) &entry, delta, &tile->q[q_off + 32 * ib + 8 * l]);
+                }
+                qs += 4;
+            }
+        }
+    }
+}
+
 // unpack src1 tile from q8_K rows. num_k = K-blocks per row: each row decodes num_k consecutive
 // source blocks (rows[r][kblk + slab]) into the tile at row stride num_k*256, so each activation
 // row is one long stream. num_k=1 is the standard single-slab path (byte-identical to before).
@@ -627,6 +720,9 @@ static bool ggml_tiled_supported(const struct ggml_tensor * src0,
         case GGML_TYPE_IQ3_S:
         case GGML_TYPE_IQ1_S:
         case GGML_TYPE_IQ1_M:
+        case GGML_TYPE_IQ1_XS:
+        case GGML_TYPE_IQ1_XXS:
+        case GGML_TYPE_IQ1_XXXS:
             return true;
         default:
             return false;
@@ -1194,6 +1290,12 @@ static bool ggml_tiled_matmul_type_dispatch(const struct ggml_compute_params * p
             return tiled_matmul_dispatch<block_iq1_s, 32, false, 128, true>(params, dst, expert_rows, cur_a, cne1, scratch);
         case GGML_TYPE_IQ1_M:
             return tiled_matmul_dispatch<block_iq1_m, 16, false, 128, true>(params, dst, expert_rows, cur_a, cne1, scratch);
+        case GGML_TYPE_IQ1_XS:
+            return tiled_matmul_dispatch<block_iq1_xs, 32, false, 128, true>(params, dst, expert_rows, cur_a, cne1, scratch);
+        case GGML_TYPE_IQ1_XXS:
+            return tiled_matmul_dispatch<block_iq1_xxs, 32, false, 128, true>(params, dst, expert_rows, cur_a, cne1, scratch);
+        case GGML_TYPE_IQ1_XXXS:
+            return tiled_matmul_dispatch<block_iq1_xxxs, 32, false, 128, true>(params, dst, expert_rows, cur_a, cne1, scratch);
         default:
             return false;
     }
