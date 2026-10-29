@@ -841,6 +841,9 @@ struct LLM_KV {
     llm_arch arch;
     const char * suffix;
 
+    // file-declared arch name, when it differs from the canonical name (e.g. "glm5next")
+    std::string arch_name;
+
     std::string operator()(llm_kv kv) const;
 };
 

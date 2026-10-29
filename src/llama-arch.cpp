@@ -1170,7 +1170,8 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
 LLM_KV::LLM_KV(llm_arch arch, const char * suffix) : arch(arch), suffix(suffix) {}
 
 std::string LLM_KV::operator()(llm_kv kv) const {
-    std::string name = ::format(LLM_KV_NAMES.at(kv), LLM_ARCH_NAMES.at(arch));
+    const char * prefix = arch_name.empty() ? LLM_ARCH_NAMES.at(arch) : arch_name.c_str();
+    std::string name = ::format(LLM_KV_NAMES.at(kv), prefix);
 
     if (suffix != nullptr) {
         name += ".";
@@ -1219,6 +1220,11 @@ llm_arch llm_arch_from_string(const std::string & name) {
         if (kv.second == name) {
             return kv.first;
         }
+    }
+
+    // aliases for names used by third-party GGUF writers
+    if (name == "glm5next") {
+        return LLM_ARCH_GLM5_NEXT; // unsloth writes "glm5next" (no dash)
     }
 
     return LLM_ARCH_UNKNOWN;
