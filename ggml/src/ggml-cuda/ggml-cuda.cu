@@ -174,6 +174,12 @@ static bool ggml_cuda_fusion_disabled() {
     return disabled;
 }
 
+// debug: sync after every node to pinpoint faulting kernels
+static bool ggml_cuda_nodesync_enabled() {
+    static const bool enabled = ggml_cuda_env_flag("GGML_GFX906_NODESYNC");
+    return enabled;
+}
+
 static bool ggml_cuda_p2p_enabled() {
     static const bool enabled = ggml_cuda_env_set("GGML_CUDA_P2P");
     return enabled;
@@ -3228,6 +3234,7 @@ static bool ggml_cuda_ssm_conv_state_match(
     fused.state_rows       = (const float *)   states->data;
     fused.state_ids        = (const int32_t *) ids->data;
     fused.state_row_stride = (int64_t) (states->nb[1] / sizeof(float));
+    fused.state_n_rows     = states->ne[1];
     fused.tok              = (const float *)   tok->data;
     fused.tok_nb0          = tok->nb[0];
     fused.tok_nb1          = tok->nb[1];
@@ -5224,11 +5231,30 @@ static void ggml_cuda_graph_evaluate_and_capture(ggml_backend_cuda_context * cud
                 GGML_UNUSED(integrated);
 #endif  // NDEBUG
 
+                if (ggml_cuda_nodesync_enabled()) {
+                    fprintf(stderr, "nodesync: node %d %s (%s) ne=%ldx%ldx%ldx%ld\n",
+                            i, node->name, ggml_op_name(node->op),
+                            (long) node->ne[0], (long) node->ne[1], (long) node->ne[2], (long) node->ne[3]);
+                }
                 bool ok = ggml_cuda_compute_forward(*cuda_ctx, node);
                 if (!ok) {
                     GGML_LOG_ERROR("%s: op not supported %s (%s)\n", __func__, node->name, ggml_op_name(node->op));
                 }
                 GGML_ASSERT(ok);
+                if (ggml_cuda_nodesync_enabled()) {
+                    // a sync is illegal while the stream is capturing
+                    cudaStreamCaptureStatus cap;
+                    const bool capturing = cudaStreamIsCapturing(cuda_ctx->stream(), &cap) == cudaSuccess &&
+                                           cap != cudaStreamCaptureStatusNone;
+                    if (!capturing) {
+                        const cudaError_t err = cudaStreamSynchronize(cuda_ctx->stream());
+                        if (err != cudaSuccess) {
+                            GGML_LOG_ERROR("nodesync: fault after node %d %s (%s): %s\n",
+                                    i, node->name, ggml_op_name(node->op), cudaGetErrorString(err));
+                            GGML_ABORT("nodesync fault");
+                        }
+                    }
+                }
                 if (prof_on) {
                     CUDA_CHECK(cudaEventRecord(prof_ev1, cuda_ctx->stream()));
                     ggml_cuda_op_prof_pending.push_back({prof_ev0, prof_ev1,

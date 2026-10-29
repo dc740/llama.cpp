@@ -140,8 +140,11 @@ static __global__ __launch_bounds__(256, BLOCKS) void gdn_single(ggml_cuda_gdn_m
     const int                                      h     = (blockIdx.x / (D / V)) % a.H;
     const int                                      seq   = blockIdx.x / ((D / V) * a.H);
     const int                                      v0    = slice * V;
-    const int64_t                                  soff  = (a.state_ids ? (int64_t) a.state_ids[seq] * a.state_stride
-                                                                         : (int64_t) seq * a.H * D * D)
+    // clamp the row like gated_delta_net_cuda: -1 ids must not fault the kernel
+    int64_t                                          srow  = a.state_ids ? (int64_t) a.state_ids[seq] : seq;
+    srow = srow < 0 ? 0 : (srow >= a.state_n_rows ? a.state_n_rows - 1 : srow);
+    const int64_t                                  soff  = (a.state_ids ? srow * a.state_stride
+                                                                         : (int64_t) srow * a.H * D * D)
                                                           + (int64_t) h * D * D;
     const int64_t                                  qoff  = (seq / a.rq3) * a.sq3 + (h % a.H_k) * a.sq1;
     const int64_t                                  voff  = seq * a.sv3 + h * a.sv1 + v0;

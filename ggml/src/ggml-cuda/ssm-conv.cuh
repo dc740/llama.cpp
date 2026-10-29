@@ -8,6 +8,7 @@ struct ggml_cuda_ssm_conv_state_fusion {
     const float *   state_rows;       // conv state cache base
     const int32_t * state_ids;        // per-seq state slot ids (graph input)
     int64_t         state_row_stride; // floats per slot row
+    int64_t         state_n_rows;     // rows in the cache tensor (bounds for ids)
     const float *   tok;              // new token columns (the concat's second source)
     size_t          tok_nb0;
     size_t          tok_nb1;

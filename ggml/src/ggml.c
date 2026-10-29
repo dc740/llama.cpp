@@ -5759,6 +5759,19 @@ struct ggml_tensor * ggml_ssm_conv(
     result->src[0] = sx;
     result->src[1] = c;
 
+    // keep the gather ids and the token columns of a fused conv-state read alive:
+    // a backend may elide the gather/concat and read them in-kernel from this node
+    if (sx->op == GGML_OP_CONCAT) {
+        const struct ggml_tensor * t = sx->src[0];
+        while (t->view_src != NULL) {
+            t = t->view_src;
+        }
+        if (t->op == GGML_OP_GET_ROWS && t->src[1] != NULL) {
+            result->src[2] = t->src[1];
+            result->src[3] = sx->src[1];
+        }
+    }
+
     return result;
 }
 
@@ -6494,6 +6507,20 @@ struct ggml_tensor * ggml_gated_delta_net(
     result->src[3] = g;
     result->src[4] = beta;
     result->src[5] = state;
+
+    // keep the ids of a recurrent-state gather alive until this node: a fused
+    // backend may elide the gather and read them in-kernel (see ggml-cuda's
+    // ggml_cuda_gdn_fused_state_src); otherwise the allocator can free and reuse
+    // the ids buffer before the kernel runs
+    {
+        const struct ggml_tensor * t = state;
+        while (t->view_src != NULL) {
+            t = t->view_src;
+        }
+        if (t->op == GGML_OP_GET_ROWS && t->src[1] != NULL) {
+            result->src[6] = t->src[1];
+        }
+    }
 
     return result;
 }
