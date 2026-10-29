@@ -39,7 +39,7 @@ Max serving ctx (llama-server, `--parallel 8`, prod flags, native max 1048576):
 
 | model | max total ctx | per-slot | binding limit |
 |---|---|---|---|
-| GLM-5.3 | 131072 verified, ceiling <245760 | 16384+ | single 32GB VRAM: 19.1GB weights + ~44.5KiB/tok KV + ~3GB compute |
+| GLM-5.3 | 147456 | 18432 | single 32GB VRAM: 19.1GB weights + ~44.5KiB/tok KV + ~3GB compute; 163840 loads but crashes on 8-way decode OOM |
 | Kimi-K3 | 524288 | 65536 | ~6GB/GPU VRAM headroom after weight split; ~29KiB/tok KV |
 
 Server-path notes: GLM `--spec-type draft-mtp --spec-draft-n-max 3` gives 6.3-6.7 t/s single-stream (~65-70% accept) but collapses to ~1.4 agg under 8-way concurrent decode (MTP+parallel serialization - prod caveat). K3 server burst-8 (no spec) scales cleanly to ~5.4 agg at both 131072 and 524288 ctx. K3 `--spec-type ngram-simple` measured net-negative on real chat (-9% tg, ~4% accept) - removed from service recommendation.
