@@ -26,18 +26,25 @@
 
 ## measured (`dev-master`)
 
-Aggregate throughput serving **8 simultaneous streams** (`llama-batched-bench -npl 8`, `-t 28`, `--numa mirror`, experts on CPU):
+llama-batched-bench curve (`-t 32` GLM / `-t 30` K3, `--numa mirror`, experts on CPU, PP512 row, `-c 16384` GLM / `-c 8192` K3):
 
-| model | config | pp t/s | tg t/s |
+| model | config | single tg | agg tg @ streams | per-seq tg @ peak |
+|---|---|---|---|---|
+| GLM-5.3 UD-Q4_K_XL (744B, 435GiB) | `-ngl 99 -dev ROCm0 -ot exps=CPU` | 4.40 | **15.27** @24 | 0.64 |
+| Kimi-K3 UD-TQ1_0 (2.8T, ~474GB) | `-ngl 99 -dev ROCm0,ROCm1,ROCm2 -ot exps=CPU` | 2.46 | **6.34** @24 | 0.26 |
+
+K3 numbers include `k3-iqk-port` (VNNI vec_dot + tiled matmul for IQ1_XS/XXS/XXXS): +24-28% agg tg vs pre-port build. GLM peak is npl24; npl32 cliffs to ~2.5 (page thrash). Single = `-npl 1` decode.
+
+Max serving ctx (llama-server, `--parallel 8`, prod flags, native max 1048576):
+
+| model | max total ctx | per-slot | binding limit |
 |---|---|---|---|
-| GLM-5.3 UD-Q4_K_XL (744B, 435GiB) | `-ngl 99 -dev ROCm0 -ot exps=CPU` | **14.63** | **10.70** |
-| Kimi-K3 UD-TQ1_0 (2.8T, ~474GB) | `-ngl 99 -dev ROCm0,ROCm1,ROCm2 -ot exps=CPU` | **5.47** | **4.17** |
+| GLM-5.3 | 131072 verified, ceiling <245760 | 16384+ | single 32GB VRAM: 19.1GB weights + ~44.5KiB/tok KV + ~3GB compute |
+| Kimi-K3 | 524288 | 65536 | ~6GB/GPU VRAM headroom after weight split; ~29KiB/tok KV |
 
-Re-measured 2026-10-27 after `fix-numa-mirror-tiled`, `fix-mmq-tiling-revert`, `fix-mirror-bind{,-cap}` (PP512 row, `-c 16384` GLM / `-c 8192` K3). Prior rows: GLM 13.74/9.90, K3 5.59/4.19.
+Server-path notes: GLM `--spec-type draft-mtp --spec-draft-n-max 3` gives 6.3-6.7 t/s single-stream (~65-70% accept) but collapses to ~1.4 agg under 8-way concurrent decode (MTP+parallel serialization - prod caveat). K3 server burst-8 (no spec) scales cleanly to ~5.4 agg at both 131072 and 524288 ctx. K3 `--spec-type ngram-simple` measured net-negative on real chat (-9% tg, ~4% accept) - removed from service recommendation.
 
 `fix-mirror-cap` A/B (home-anon coverage ~46% -> ~100%, same run config): GLM pp512 13.47/10.17 (2 runs, noisy) tg512 9.92/6.87 vs 11.35/10.14 warm baseline - tg inside the historical 7.38-10.14 band; K3 5.49/4.18 vs 5.52/4.16; Qwen3.6-35B sanity 834/83 unchanged. Full coverage is not the tg bottleneck - residual remote-read cost is elsewhere (icache, barrier, KDA path).
-
-GLM-5.3 MTP speculative decode (optional, single-stream): `--spec-type draft-mtp --spec-draft-n-max 3` decodes ~6.54 tg t/s vs ~4.3 without (+36-52%, ~70% acceptance). Not used in the rows above.
 
 Single-GPU `llama-bench` (-ngl 999 -fa on -ctk/-ctv q8_0 -t8 -p512 -n64 -d8192). Stock upstream on the same host/config: 27B 153/22, 35B-A3B 437/71:
 
