@@ -13,6 +13,7 @@ struct ggml_cuda_gated_delta_net_fused_state {
     const float *   rows;       // cache rows (get_rows src0)
     const int32_t * ids;        // state slot per sequence (get_rows src1)
     int64_t         row_stride; // elements between cache rows
+    int64_t         n_rows;     // rows in the cache tensor (bounds for ids)
 };
 
 // detects that the state input of `gdn` is a zero-offset view of a one-row

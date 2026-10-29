@@ -130,6 +130,7 @@ static __global__ void ssm_conv_long_token_f32(const float * __restrict__ src0, 
 template <bool apply_silu, size_t split_d_inner, size_t d_conv>
 static __global__ void ssm_conv_stateful_f32(const float * __restrict__ state_rows,
                                              const int32_t * __restrict__ state_ids, const int64_t state_row_stride,
+                                             const int64_t state_n_rows,
                                              const float * __restrict__ tok, const int tok_nb0, const int tok_nb1,
                                              const int tok_nb2, const float * __restrict__ src1_ptr, const int src1_nb1,
                                              const float * __restrict__ bias_ptr, float * __restrict__ wb_ptr,
@@ -153,7 +154,11 @@ static __global__ void ssm_conv_stateful_f32(const float * __restrict__ state_ro
 
     ggml_cuda_pdl_sync();
 
-    const float * GGML_CUDA_RESTRICT s_row = state_rows + (int64_t) state_ids[bidx] * state_row_stride;
+    // clamp the row: ids can carry -1 for a cell with no source; on GPU that is an
+    // aperture violation, not the benign wrong-row read it is on CPU
+    int64_t s_row_idx = (int64_t) state_ids[bidx];
+    s_row_idx = s_row_idx < 0 ? 0 : (s_row_idx >= state_n_rows ? state_n_rows - 1 : s_row_idx);
+    const float * GGML_CUDA_RESTRICT s_row = state_rows + s_row_idx * state_row_stride;
 #pragma unroll
     for (size_t j = 0; j < d_conv; j++) {
         w[j] = w_row[tid * stride_w + j];
@@ -212,7 +217,7 @@ static void ssm_conv_stateful_f32_cuda(const ggml_cuda_ssm_conv_state_fusion & f
         const dim3 blocks(n_s, (nr + threads - 1) / threads, 1);
         const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(blocks, threads, 0, stream);
         ggml_cuda_kernel_launch(ssm_conv_stateful_f32<apply_silu, threads, kNC>, launch_params, fs.state_rows, fs.state_ids,
-                                fs.state_row_stride, fs.tok, (int) fs.tok_nb0, (int) fs.tok_nb1, (int) fs.tok_nb2, src1,
+                                fs.state_row_stride, fs.state_n_rows, fs.tok, (int) fs.tok_nb0, (int) fs.tok_nb1, (int) fs.tok_nb2, src1,
                                 src1_nb1, bias, fs.wb, fs.wb_seq_stride, dst, dst_nb0, dst_nb1, dst_nb2, n_t);
     };
 

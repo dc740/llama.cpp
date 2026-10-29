@@ -33,6 +33,7 @@ struct ggml_cuda_gdn_mma_args {
     // when set, `state` is the cache and the per-seq row comes from state_ids*state_stride
     const int32_t * state_ids;
     int64_t         state_stride;
+    int64_t         state_n_rows;
 };
 
 bool ggml_cuda_gdn_mma_launch(int device, const ggml_cuda_gdn_mma_args & args, cudaStream_t stream);
